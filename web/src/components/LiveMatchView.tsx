@@ -288,68 +288,59 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-display text-lg font-bold text-white">P&L Performance</h3>
             <div className="flex items-center gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-cyan" />
-                <span className="text-text-secondary">Agent #{matchState.agent1State.agentId}</span>
+              <div className="flex items-center gap-2 font-mono uppercase">
+                <div className="w-4 h-4 bg-ink border-2 border-ink" />
+                <span>#{matchState.agent1State.agentId}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-magenta" />
-                <span className="text-text-secondary">Agent #{matchState.agent2State.agentId}</span>
+              <div className="flex items-center gap-2 font-mono uppercase">
+                <div className="w-4 h-4 bg-accent border-2 border-ink" />
+                <span>#{matchState.agent2State.agentId}</span>
               </div>
             </div>
           </div>
 
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={pnlHistory}>
-              <defs>
-                <linearGradient id="cyanGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#00F5FF" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#00F5FF" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="magentaGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#FF006E" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#FF006E" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#252538" vertical={false} />
+              <CartesianGrid strokeDasharray="0" stroke="#0a0a0a" strokeOpacity={0.15} vertical={false} />
               <XAxis
                 dataKey="time"
-                stroke="#606078"
-                tick={{ fill: '#606078', fontSize: 11 }}
+                stroke="#0a0a0a"
+                tick={{ fill: '#0a0a0a', fontSize: 11, fontFamily: 'JetBrains Mono' }}
                 tickLine={false}
-                axisLine={{ stroke: '#252538' }}
+                axisLine={{ stroke: '#0a0a0a', strokeWidth: 2 }}
               />
               <YAxis
-                stroke="#606078"
-                tick={{ fill: '#606078', fontSize: 11 }}
+                stroke="#0a0a0a"
+                tick={{ fill: '#0a0a0a', fontSize: 11, fontFamily: 'JetBrains Mono' }}
                 tickLine={false}
-                axisLine={false}
+                axisLine={{ stroke: '#0a0a0a', strokeWidth: 2 }}
                 tickFormatter={(v) => `$${v}`}
               />
               <Tooltip
                 contentStyle={{
-                  background: '#141420',
-                  border: '1px solid #252538',
-                  borderRadius: '8px',
+                  background: '#f5f5f0',
+                  border: '3px solid #0a0a0a',
+                  borderRadius: '0',
                   fontFamily: 'JetBrains Mono',
                   fontSize: '12px',
+                  boxShadow: '4px 4px 0 0 #0a0a0a',
                 }}
-                labelStyle={{ color: '#A0A0B8' }}
+                labelStyle={{ color: '#0a0a0a', fontWeight: 700 }}
               />
-              <ReferenceLine y={0} stroke="#606078" strokeDasharray="3 3" />
+              <ReferenceLine y={0} stroke="#0a0a0a" strokeDasharray="4 4" />
               <Line
-                type="monotone"
+                type="stepAfter"
                 dataKey="agent1"
-                stroke="#00F5FF"
-                strokeWidth={2}
+                stroke="#0a0a0a"
+                strokeWidth={3}
                 dot={false}
                 name={`Agent #${matchState.agent1State.agentId}`}
               />
               <Line
-                type="monotone"
+                type="stepAfter"
                 dataKey="agent2"
-                stroke="#FF006E"
-                strokeWidth={2}
+                stroke="#ff3b00"
+                strokeWidth={3}
                 dot={false}
                 name={`Agent #${matchState.agent2State.agentId}`}
               />

@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Clock, DollarSign, Zap, TrendingUp, TrendingDown } from 'lucide-react'
 
 interface Match {
   matchId: string
@@ -18,185 +17,92 @@ interface Match {
 
 const TIER_NAMES = ['Rookie', 'Bronze', 'Silver', 'Gold', 'Diamond']
 
-export function MatchCard({
-  match,
-  onClick,
-}: {
-  match: Match
-  onClick?: () => void
-}) {
+export function MatchCard({ match, onClick }: { match: Match; onClick?: () => void }) {
   const [timeRemaining, setTimeRemaining] = useState(900)
 
   useEffect(() => {
     if (!match.startedAt) return
-
-    const updateTime = () => {
+    const update = () => {
       const remaining = Math.max(0, 900 - (Date.now() / 1000 - match.startedAt!))
       setTimeRemaining(Math.floor(remaining))
     }
-
-    updateTime()
-    const interval = setInterval(updateTime, 1000)
-    return () => clearInterval(interval)
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
   }, [match.startedAt])
 
   const minutes = Math.floor(timeRemaining / 60)
   const seconds = timeRemaining % 60
   const timeProgress = ((900 - timeRemaining) / 900) * 100
-
   const tierClass = `tier-${TIER_NAMES[match.tier].toLowerCase()}`
 
-  // Determine who's winning
-  const agent1Leading = (match.agent1Pnl || 0) > (match.agent2Pnl || 0)
-  const agent2Leading = (match.agent2Pnl || 0) > (match.agent1Pnl || 0)
+  const a1 = match.agent1Pnl || 0
+  const a2 = match.agent2Pnl || 0
+  const a1Leading = a1 > a2
+  const a2Leading = a2 > a1
 
   return (
     <div
       onClick={onClick}
-      className="glass-panel p-5 cursor-pointer card-hover group relative overflow-hidden"
+      className="brutal-card brutal-shadow card-hover cursor-pointer p-0 bg-paper"
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onClick?.()}
       aria-label={`Match: Agent ${match.agent1Id} vs Agent ${match.agent2Id}`}
     >
-      {/* Background glow effect */}
-      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-        <div className="absolute top-0 left-0 w-1/2 h-full bg-gradient-to-r from-cyan/5 to-transparent" />
-        <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-magenta/5 to-transparent" />
+      {/* HEADER STRIP */}
+      <div className="bg-ink text-paper px-4 py-2 flex items-center justify-between font-mono text-xs uppercase tracking-widest">
+        <span>MATCH//{match.matchId.slice(-6)}</span>
+        <span className="text-accent">● LIVE</span>
       </div>
 
-      {/* Header */}
-      <div className="relative flex items-center justify-between mb-5">
-        <div className="flex items-center gap-2">
-          <span className={`tier-badge ${tierClass}`}>
-            {TIER_NAMES[match.tier]}
-          </span>
-          <div className="live-indicator text-xs">
-            Live
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-text-secondary">
-          <Clock className="w-4 h-4" />
-          <span className="font-mono text-sm font-medium text-white">
+      <div className="p-5">
+        {/* TAGS ROW */}
+        <div className="flex items-center justify-between mb-4">
+          <span className={`tier-badge ${tierClass}`}>{TIER_NAMES[match.tier]}</span>
+          <span className="font-display text-xl tabular-nums">
             {minutes}:{seconds.toString().padStart(2, '0')}
           </span>
         </div>
-      </div>
 
-      {/* Time Progress Bar */}
-      <div className="relative mb-6">
-        <div className="progress-bar">
-          <div
-            className="progress-bar-fill bg-gradient-to-r from-cyan via-magenta to-cyan"
-            style={{ width: `${timeProgress}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Agents Battle View */}
-      <div className="relative flex items-center justify-between mb-6">
-        {/* Agent 1 (Cyan) */}
-        <AgentBattleCard
-          agentId={match.agent1Id}
-          pnl={match.agent1Pnl || 0}
-          side="cyan"
-          isLeading={agent1Leading}
-        />
-
-        {/* VS Divider */}
-        <div className="vs-divider flex-shrink-0 mx-2">
-          <span>VS</span>
+        {/* TIME BAR */}
+        <div className="progress-bar mb-6">
+          <div className="progress-bar-fill" style={{ width: `${timeProgress}%` }} />
         </div>
 
-        {/* Agent 2 (Magenta) */}
-        <AgentBattleCard
-          agentId={match.agent2Id}
-          pnl={match.agent2Pnl || 0}
-          side="magenta"
-          isLeading={agent2Leading}
-        />
-      </div>
+        {/* DUEL */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 mb-6">
+          <Fighter id={match.agent1Id} pnl={a1} leading={a1Leading} align="left" />
+          <div className="vs-divider"><span>VS</span></div>
+          <Fighter id={match.agent2Id} pnl={a2} leading={a2Leading} align="right" />
+        </div>
 
-      {/* Prize Pool */}
-      <div className="relative flex items-center justify-center gap-3 py-3 rounded-lg bg-elevated border border-arena-border group-hover:border-gold/30 transition-colors">
-        <DollarSign className="w-5 h-5 text-gold" />
-        <div className="flex items-baseline gap-2">
-          <span className="font-display text-xl font-bold text-gold">
-            ${(match.prizePool / 1000000).toFixed(2)}
-          </span>
-          <span className="text-text-tertiary text-sm font-body">Prize Pool</span>
+        {/* PRIZE */}
+        <div className="border-t-[3px] border-ink pt-3 flex items-baseline justify-between">
+          <span className="data-label">PRIZE POOL</span>
+          <span className="font-display text-2xl">${(match.prizePool / 1000000).toFixed(2)}</span>
         </div>
       </div>
-
-      {/* Corner accents */}
-      <div className="absolute top-0 left-0 w-8 h-8 border-l-2 border-t-2 border-cyan/30 rounded-tl-xl" />
-      <div className="absolute top-0 right-0 w-8 h-8 border-r-2 border-t-2 border-magenta/30 rounded-tr-xl" />
-      <div className="absolute bottom-0 left-0 w-8 h-8 border-l-2 border-b-2 border-cyan/30 rounded-bl-xl" />
-      <div className="absolute bottom-0 right-0 w-8 h-8 border-r-2 border-b-2 border-magenta/30 rounded-br-xl" />
     </div>
   )
 }
 
-function AgentBattleCard({
-  agentId,
-  pnl,
-  side,
-  isLeading,
-}: {
-  agentId: number
-  pnl: number
-  side: 'cyan' | 'magenta'
-  isLeading: boolean
-}) {
-  const isPositive = pnl >= 0
-  const color = side === 'cyan' ? 'cyan' : 'magenta'
-
+function Fighter({
+  id, pnl, leading, align,
+}: { id: number; pnl: number; leading: boolean; align: 'left' | 'right' }) {
+  const positive = pnl >= 0
   return (
-    <div className={`flex-1 text-center ${side === 'magenta' ? 'order-last' : ''}`}>
-      {/* Agent Avatar */}
-      <div className="relative inline-block mb-3">
-        <div
-          className={`
-            w-16 h-16 rounded-2xl flex items-center justify-center
-            font-display text-2xl font-bold
-            bg-gradient-to-br transition-all duration-300
-            ${side === 'cyan'
-              ? 'from-cyan/20 to-cyan/5 text-cyan border border-cyan/30'
-              : 'from-magenta/20 to-magenta/5 text-magenta border border-magenta/30'
-            }
-            ${isLeading ? 'scale-110 shadow-lg' : ''}
-            ${isLeading && side === 'cyan' ? 'shadow-glow-cyan' : ''}
-            ${isLeading && side === 'magenta' ? 'shadow-glow-magenta' : ''}
-          `}
-        >
-          #{agentId}
-        </div>
-        {isLeading && (
-          <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-gold flex items-center justify-center">
-            <Zap className="w-2.5 h-2.5 text-void" />
-          </div>
-        )}
-      </div>
-
-      {/* Agent Label */}
-      <div className="text-text-tertiary text-xs font-body mb-2 uppercase tracking-wider">
-        Agent
-      </div>
-
-      {/* P&L */}
+    <div className={`flex flex-col ${align === 'right' ? 'items-end text-right' : 'items-start text-left'}`}>
       <div
-        className={`
-          flex items-center justify-center gap-1 font-mono text-sm font-medium
-          ${isPositive ? 'text-success' : 'text-danger'}
-        `}
+        className={`w-16 h-16 border-[3px] border-ink flex items-center justify-center font-display text-xl mb-2 ${
+          leading ? 'bg-accent text-paper brutal-shadow-sm' : 'bg-paper text-ink'
+        }`}
       >
-        {isPositive ? (
-          <TrendingUp className="w-3 h-3" />
-        ) : (
-          <TrendingDown className="w-3 h-3" />
-        )}
-        {isPositive ? '+' : ''}${Math.abs(pnl / 100).toFixed(2)}
+        #{id}
+      </div>
+      <div className="font-mono text-[10px] uppercase tracking-widest text-muted">AGENT</div>
+      <div className={`font-mono text-sm font-bold ${positive ? '' : ''}`}>
+        {positive ? '+' : '−'}${Math.abs(pnl / 100).toFixed(2)}
       </div>
     </div>
   )

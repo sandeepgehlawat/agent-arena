@@ -3,17 +3,6 @@
 import { useEffect, useState } from 'react'
 import { MatchCard } from '@/components/MatchCard'
 import { LiveMatchView } from '@/components/LiveMatchView'
-import {
-  Swords,
-  TrendingUp,
-  Trophy,
-  Users,
-  Zap,
-  ChevronRight,
-  ArrowUpRight,
-  Clock,
-  DollarSign,
-} from 'lucide-react'
 import Link from 'next/link'
 
 interface Match {
@@ -41,56 +30,20 @@ interface RecentResult {
   timestamp: number
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3460'
-
 const TIER_NAMES = ['Rookie', 'Bronze', 'Silver', 'Gold', 'Diamond']
 
 export default function Home() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([])
   const [recentResults, setRecentResults] = useState<RecentResult[]>([])
   const [selectedMatch, setSelectedMatch] = useState<string | null>(null)
-  const [stats, setStats] = useState({
-    totalMatches: 0,
-    activeAgents: 0,
-    totalVolume: 0,
-    activeTournaments: 0,
-  })
+  const [stats, setStats] = useState({ totalMatches: 0, activeAgents: 0, totalVolume: 0, activeTournaments: 0 })
 
-  // Mock data for demo
   useEffect(() => {
     setLiveMatches([
-      {
-        matchId: 'demo-match-1',
-        agent1Id: 7,
-        agent2Id: 12,
-        tier: 3,
-        status: 'InProgress',
-        entryFee: 500000000,
-        prizePool: 975000000,
-        startedAt: Date.now() / 1000 - 420,
-      },
-      {
-        matchId: 'demo-match-2',
-        agent1Id: 3,
-        agent2Id: 15,
-        tier: 2,
-        status: 'InProgress',
-        entryFee: 100000000,
-        prizePool: 195000000,
-        startedAt: Date.now() / 1000 - 180,
-      },
-      {
-        matchId: 'demo-match-3',
-        agent1Id: 21,
-        agent2Id: 9,
-        tier: 1,
-        status: 'InProgress',
-        entryFee: 25000000,
-        prizePool: 48750000,
-        startedAt: Date.now() / 1000 - 600,
-      },
+      { matchId: 'demo-match-1', agent1Id: 7, agent2Id: 12, tier: 3, status: 'InProgress', entryFee: 500000000, prizePool: 975000000, startedAt: Date.now() / 1000 - 420 },
+      { matchId: 'demo-match-2', agent1Id: 3, agent2Id: 15, tier: 2, status: 'InProgress', entryFee: 100000000, prizePool: 195000000, startedAt: Date.now() / 1000 - 180 },
+      { matchId: 'demo-match-3', agent1Id: 21, agent2Id: 9, tier: 1, status: 'InProgress', entryFee: 25000000, prizePool: 48750000, startedAt: Date.now() / 1000 - 600 },
     ])
-
     setRecentResults([
       { matchId: 'r1', agent1Id: 1, agent2Id: 5, tier: 2, winnerId: 1, winnerPnl: 12550, prize: 195000000, timestamp: Date.now() - 300000 },
       { matchId: 'r2', agent1Id: 3, agent2Id: 8, tier: 3, winnerId: 8, winnerPnl: 8920, prize: 975000000, timestamp: Date.now() - 600000 },
@@ -98,24 +51,17 @@ export default function Home() {
       { matchId: 'r4', agent1Id: 7, agent2Id: 11, tier: 4, winnerId: 7, winnerPnl: 45230, prize: 3900000000, timestamp: Date.now() - 1200000 },
       { matchId: 'r5', agent1Id: 9, agent2Id: 14, tier: 2, winnerId: 14, winnerPnl: 11200, prize: 195000000, timestamp: Date.now() - 1500000 },
     ])
-
-    setStats({
-      totalMatches: 12847,
-      activeAgents: 247,
-      totalVolume: 24500000,
-      activeTournaments: 3,
-    })
+    setStats({ totalMatches: 12847, activeAgents: 247, totalVolume: 24500000, activeTournaments: 3 })
   }, [])
 
   if (selectedMatch) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-8">
         <button
           onClick={() => setSelectedMatch(null)}
-          className="flex items-center gap-2 text-text-secondary hover:text-cyan transition-colors mb-6 font-body"
+          className="btn-secondary text-xs mb-6"
         >
-          <ChevronRight className="w-4 h-4 rotate-180" />
-          Back to Arena
+          ◄ BACK TO ARENA
         </button>
         <LiveMatchView matchId={selectedMatch} />
       </div>
@@ -123,135 +69,102 @@ export default function Home() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6">
-      {/* Hero Section */}
-      <div className="relative py-12 mb-12">
-        <div className="absolute inset-0 flex items-center justify-center opacity-5 pointer-events-none">
-          <Swords className="w-96 h-96" />
-        </div>
-
-        <div className="relative text-center stagger-children">
-          <h1 className="font-display text-display-lg sm:text-display-xl font-bold mb-4">
-            <span className="text-cyan text-glow-cyan">NEURAL</span>
-            {' '}
-            <span className="text-magenta text-glow-magenta">COMBAT</span>
-          </h1>
-          <p className="text-text-secondary text-lg max-w-2xl mx-auto font-body mb-8">
-            AI agents battle head-to-head in high-stakes crypto trading. Real prices. Real stakes. Real winners.
-          </p>
-
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <Link href="/tournaments" className="btn-primary">
-              <Zap className="w-4 h-4" />
-              Enter Tournament
-            </Link>
-            <Link href="/docs" className="btn-secondary">
-              Learn More
-            </Link>
+    <div className="max-w-[1400px] mx-auto px-4 sm:px-6">
+      {/* HERO */}
+      <section className="border-b-[3px] border-ink py-12 sm:py-20 -mx-4 sm:-mx-6 px-4 sm:px-6 mb-0">
+        <div className="grid grid-cols-12 gap-6 items-end">
+          <div className="col-span-12 lg:col-span-8">
+            <div className="font-mono text-xs uppercase tracking-[0.2em] mb-4">
+              [ 01 / ARENA ] —— FILE://NEURAL.COMBAT
+            </div>
+            <h1 className="font-display text-[14vw] sm:text-[10vw] lg:text-[8rem] leading-[0.85] uppercase">
+              NEURAL<br />
+              <span className="bg-ink text-paper px-2">COMBAT</span><span className="text-accent">.</span>
+            </h1>
+            <p className="font-body text-lg sm:text-xl mt-6 max-w-xl border-l-[6px] border-ink pl-4">
+              AI agents battle head-to-head in high-stakes crypto trading.
+              <strong> Real prices. Real stakes. Real winners.</strong>
+            </p>
+            <div className="flex flex-wrap gap-4 mt-8">
+              <Link href="/tournaments" className="btn-primary">► ENTER TOURNAMENT</Link>
+              <Link href="/docs" className="btn-secondary">READ DOCS</Link>
+            </div>
+          </div>
+          <div className="col-span-12 lg:col-span-4">
+            <div className="brutal-card brutal-shadow p-0 overflow-hidden">
+              <div className="bg-ink text-paper font-mono text-xs uppercase tracking-widest px-4 py-2 flex justify-between">
+                <span>STATUS</span><span className="text-accent">● ONLINE</span>
+              </div>
+              <div className="p-5 space-y-3 font-mono text-sm">
+                <Row k="NETWORK" v="TESTNET" />
+                <Row k="LATENCY" v="42ms" />
+                <Row k="UPTIME" v="99.97%" />
+                <Row k="ORACLES" v="3/3 ●●●" />
+                <Row k="MATCHES" v={`${liveMatches.length} LIVE`} accent />
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-12 stagger-children">
-        <StatCard
-          icon={<Swords className="w-5 h-5" />}
-          label="Total Matches"
-          value={stats.totalMatches.toLocaleString()}
-          trend="+124 today"
-          trendUp={true}
-        />
-        <StatCard
-          icon={<Users className="w-5 h-5" />}
-          label="Active Agents"
-          value={stats.activeAgents.toString()}
-          trend="+12 this week"
-          trendUp={true}
-        />
-        <StatCard
-          icon={<DollarSign className="w-5 h-5" />}
-          label="24h Volume"
-          value={`$${(stats.totalVolume / 1000000).toFixed(1)}M`}
-          trend="+18.5%"
-          trendUp={true}
-        />
-        <StatCard
-          icon={<Trophy className="w-5 h-5" />}
-          label="Tournaments"
-          value={`${stats.activeTournaments} Active`}
-          trend="$50K prizes"
-          trendUp={true}
-          highlight
-        />
-      </div>
+      {/* STATS BAR */}
+      <section className="grid grid-cols-2 lg:grid-cols-4 border-b-[3px] border-ink -mx-4 sm:-mx-6">
+        <Stat label="TOTAL MATCHES" value={stats.totalMatches.toLocaleString()} sub="+124 today" />
+        <Stat label="ACTIVE AGENTS" value={stats.activeAgents.toString()} sub="+12 this week" />
+        <Stat label="24H VOLUME" value={`$${(stats.totalVolume / 1000000).toFixed(1)}M`} sub="+18.5%" />
+        <Stat label="TOURNAMENTS" value={`${stats.activeTournaments}`} sub="$50K PRIZES" highlight />
+      </section>
 
-      {/* Live Matches Section */}
-      <section className="mb-12">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="live-indicator">Live Matches</div>
-            <span className="text-text-tertiary font-mono text-sm">
-              {liveMatches.length} active
-            </span>
+      {/* LIVE MATCHES */}
+      <section className="py-12">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+          <div className="flex items-center gap-4">
+            <h2 className="font-display text-3xl sm:text-4xl uppercase">Live Matches</h2>
+            <span className="live-indicator">● {liveMatches.length} LIVE</span>
           </div>
-          <Link
-            href="/matches"
-            className="flex items-center gap-1 text-sm text-text-secondary hover:text-cyan transition-colors"
-          >
-            View All
-            <ArrowUpRight className="w-4 h-4" />
+          <Link href="/matches" className="font-mono text-sm uppercase border-b-2 border-ink hover:bg-accent hover:text-paper px-1">
+            VIEW ALL →
           </Link>
         </div>
+        <hr className="brutal-rule brutal-rule-thick" />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 stagger-children">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 stagger-children">
           {liveMatches.map((match) => (
-            <MatchCard
-              key={match.matchId}
-              match={match}
-              onClick={() => setSelectedMatch(match.matchId)}
-            />
+            <MatchCard key={match.matchId} match={match} onClick={() => setSelectedMatch(match.matchId)} />
           ))}
           {liveMatches.length === 0 && (
-            <div className="col-span-full glass-panel p-12 text-center">
-              <Swords className="w-12 h-12 mx-auto mb-4 text-text-tertiary" />
-              <p className="text-text-secondary font-body">No live matches right now</p>
-              <p className="text-text-tertiary text-sm mt-1">Check back soon or start a tournament!</p>
+            <div className="col-span-full brutal-card brutal-shadow p-12 text-center">
+              <div className="font-display text-2xl uppercase">No live matches</div>
+              <div className="font-mono text-sm mt-2">// CHECK BACK SOON</div>
             </div>
           )}
         </div>
       </section>
 
-      {/* Recent Results Section */}
-      <section>
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="font-display text-xl font-bold text-text-primary">
-            Recent Results
-          </h2>
-          <Link
-            href="/history"
-            className="flex items-center gap-1 text-sm text-text-secondary hover:text-cyan transition-colors"
-          >
-            View History
-            <ArrowUpRight className="w-4 h-4" />
+      {/* RECENT RESULTS */}
+      <section className="pb-16">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+          <h2 className="font-display text-3xl sm:text-4xl uppercase">Recent Results</h2>
+          <Link href="/history" className="font-mono text-sm uppercase border-b-2 border-ink hover:bg-accent hover:text-paper px-1">
+            FULL HISTORY →
           </Link>
         </div>
+        <hr className="brutal-rule brutal-rule-thick" />
 
-        <div className="glass-panel overflow-hidden">
+        <div className="brutal-shadow border-[3px] border-ink overflow-x-auto">
           <table className="data-table">
             <thead>
               <tr>
-                <th>Match</th>
-                <th>Tier</th>
-                <th>Winner</th>
+                <th>MATCH</th>
+                <th>TIER</th>
+                <th>WINNER</th>
                 <th className="text-right">P&L</th>
-                <th className="text-right">Prize</th>
-                <th className="text-right hide-mobile">Time</th>
+                <th className="text-right">PRIZE</th>
+                <th className="text-right hide-mobile">TIME</th>
               </tr>
             </thead>
             <tbody>
-              {recentResults.map((result, idx) => (
-                <ResultRow key={result.matchId} result={result} index={idx} />
-              ))}
+              {recentResults.map((result) => <ResultRow key={result.matchId} result={result} />)}
             </tbody>
           </table>
         </div>
@@ -260,153 +173,52 @@ export default function Home() {
   )
 }
 
-function StatCard({
-  icon,
-  label,
-  value,
-  trend,
-  trendUp,
-  highlight,
-}: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  trend?: string
-  trendUp?: boolean
-  highlight?: boolean
-}) {
+function Row({ k, v, accent }: { k: string; v: string; accent?: boolean }) {
   return (
-    <div
-      className={`
-        glass-panel p-5 card-hover
-        ${highlight ? 'glow-border-gold' : ''}
-      `}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className={`
-          w-10 h-10 rounded-lg flex items-center justify-center
-          ${highlight
-            ? 'bg-gold/20 text-gold'
-            : 'bg-cyan/10 text-cyan'
-          }
-        `}>
-          {icon}
-        </div>
-        {trend && (
-          <div className={`
-            flex items-center gap-1 text-xs font-mono
-            ${trendUp ? 'text-success' : 'text-danger'}
-          `}>
-            <TrendingUp className={`w-3 h-3 ${!trendUp && 'rotate-180'}`} />
-            {trend}
-          </div>
-        )}
-      </div>
-      <div className="data-label mb-1">{label}</div>
-      <div className="font-display text-2xl font-bold text-white">{value}</div>
+    <div className="flex justify-between items-center border-b border-dashed border-ink/40 pb-2 last:border-0">
+      <span className="text-muted">{k}</span>
+      <span className={accent ? 'bg-accent text-paper px-2 font-bold' : 'font-bold'}>{v}</span>
     </div>
   )
 }
 
-function ResultRow({ result, index }: { result: RecentResult; index: number }) {
+function Stat({ label, value, sub, highlight }: { label: string; value: string; sub: string; highlight?: boolean }) {
+  return (
+    <div className={`p-6 border-r-[3px] border-ink last:border-r-0 ${highlight ? 'bg-accent text-paper' : 'bg-paper'}`}>
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] mb-2">{label}</div>
+      <div className="font-display text-4xl sm:text-5xl leading-none">{value}</div>
+      <div className="font-mono text-xs mt-2 opacity-70">↗ {sub}</div>
+    </div>
+  )
+}
+
+function ResultRow({ result }: { result: RecentResult }) {
   const timeAgo = getTimeAgo(result.timestamp)
   const tierClass = `tier-${TIER_NAMES[result.tier].toLowerCase()}`
-
   return (
-    <tr
-      className="animate-slide-up"
-      style={{ animationDelay: `${index * 0.05}s` }}
-    >
+    <tr>
       <td>
-        <div className="flex items-center gap-3">
-          {/* Agent avatars */}
-          <div className="flex -space-x-2">
-            <AgentAvatar
-              id={result.agent1Id}
-              isWinner={result.winnerId === result.agent1Id}
-              side="cyan"
-            />
-            <AgentAvatar
-              id={result.agent2Id}
-              isWinner={result.winnerId === result.agent2Id}
-              side="magenta"
-            />
-          </div>
-          <div className="font-body">
-            <span className={result.winnerId === result.agent1Id ? 'text-cyan' : 'text-text-secondary'}>
-              #{result.agent1Id}
-            </span>
-            <span className="text-text-tertiary mx-2">vs</span>
-            <span className={result.winnerId === result.agent2Id ? 'text-magenta' : 'text-text-secondary'}>
-              #{result.agent2Id}
-            </span>
-          </div>
+        <div className="flex items-center gap-3 font-display">
+          <span className={result.winnerId === result.agent1Id ? 'bg-ink text-paper px-2' : ''}>#{result.agent1Id}</span>
+          <span className="text-muted">VS</span>
+          <span className={result.winnerId === result.agent2Id ? 'bg-ink text-paper px-2' : ''}>#{result.agent2Id}</span>
         </div>
       </td>
-      <td>
-        <span className={`tier-badge ${tierClass}`}>
-          {TIER_NAMES[result.tier]}
-        </span>
-      </td>
-      <td>
-        <div className="flex items-center gap-2">
-          <Trophy className="w-4 h-4 text-gold" />
-          <span className="font-mono text-white">Agent #{result.winnerId}</span>
-        </div>
-      </td>
-      <td className="text-right">
-        <span className="text-success font-mono">
-          +${(result.winnerPnl / 100).toFixed(2)}
-        </span>
-      </td>
-      <td className="text-right">
-        <span className="font-mono text-gold">
-          ${(result.prize / 1000000).toFixed(2)}
-        </span>
-      </td>
-      <td className="text-right hide-mobile">
-        <div className="flex items-center justify-end gap-1 text-text-tertiary">
-          <Clock className="w-3 h-3" />
-          <span className="font-mono text-sm">{timeAgo}</span>
-        </div>
-      </td>
+      <td><span className={`tier-badge ${tierClass}`}>{TIER_NAMES[result.tier]}</span></td>
+      <td><span className="font-display">★ AGENT #{result.winnerId}</span></td>
+      <td className="text-right font-bold">+${(result.winnerPnl / 100).toFixed(2)}</td>
+      <td className="text-right font-bold">${(result.prize / 1000000).toFixed(2)}</td>
+      <td className="text-right hide-mobile text-muted">{timeAgo}</td>
     </tr>
   )
 }
 
-function AgentAvatar({
-  id,
-  isWinner,
-  side,
-}: {
-  id: number
-  isWinner: boolean
-  side: 'cyan' | 'magenta'
-}) {
-  return (
-    <div
-      className={`
-        relative w-8 h-8 rounded-full flex items-center justify-center
-        text-xs font-display font-bold
-        border-2 transition-all
-        ${side === 'cyan'
-          ? 'bg-cyan-dark border-cyan text-cyan'
-          : 'bg-magenta-dark border-magenta text-magenta'
-        }
-        ${isWinner ? 'ring-2 ring-gold ring-offset-2 ring-offset-void' : 'opacity-60'}
-      `}
-    >
-      {id}
-    </div>
-  )
-}
-
 function getTimeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
+  const s = Math.floor((Date.now() - timestamp) / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h`
+  return `${Math.floor(h / 24)}d`
 }
