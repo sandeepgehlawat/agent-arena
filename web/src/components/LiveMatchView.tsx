@@ -115,14 +115,17 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
         const data = JSON.parse(event.data)
         if (data.type === 'state') {
           setMatchState(data.data)
-          setPnlHistory((prev) => {
-            const newPoint = {
-              time: prev.length,
-              agent1: data.data.agent1State.pnl,
-              agent2: data.data.agent2State.pnl,
-            }
-            return [...prev, newPoint].slice(-120) // 2 minutes of data
-          })
+          // Only update PnL history if agent states exist
+          if (data.data?.agent1State && data.data?.agent2State) {
+            setPnlHistory((prev) => {
+              const newPoint = {
+                time: prev.length,
+                agent1: data.data.agent1State.pnl ?? 0,
+                agent2: data.data.agent2State.pnl ?? 0,
+              }
+              return [...prev, newPoint].slice(-120) // 2 minutes of data
+            })
+          }
         } else if (data.type === 'trade') {
           const trade: TradeEvent = {
             agentId: data.data.agent_id,
