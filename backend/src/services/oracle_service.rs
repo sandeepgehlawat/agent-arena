@@ -92,21 +92,22 @@ impl OracleService {
         );
 
         // Submit result
-        let tx = contract
-            .submit_result(
-                match_id_bytes,
-                I256::from(agent1_pnl),
-                I256::from(agent2_pnl),
-                result_hash,
-            )
+        let call = contract.submit_result(
+            match_id_bytes,
+            I256::from(agent1_pnl),
+            I256::from(agent2_pnl),
+            result_hash,
+        );
+
+        let pending_tx = call
             .send()
             .await
             .map_err(|e| AppError::Internal(format!("Transaction error: {}", e)))?;
 
-        let tx_hash = format!("{:?}", tx.tx_hash());
-        tracing::info!("Submitted result for match {}: {}", match_id, tx_hash);
+        let tx_hash = pending_tx.tx_hash();
+        tracing::info!("Submitted result for match {}: {:?}", match_id, tx_hash);
 
-        Ok(tx_hash)
+        Ok(format!("{:?}", tx_hash))
     }
 
     /// Settle match on-chain (distribute prizes)
@@ -148,16 +149,17 @@ impl OracleService {
             ethers::utils::keccak256(match_id.as_bytes())
         };
 
-        let tx = contract
-            .settle_match(match_id_bytes)
+        let call = contract.settle_match(match_id_bytes);
+
+        let pending_tx = call
             .send()
             .await
             .map_err(|e| AppError::Internal(format!("Transaction error: {}", e)))?;
 
-        let tx_hash = format!("{:?}", tx.tx_hash());
-        tracing::info!("Settled match {}: {}", match_id, tx_hash);
+        let tx_hash = pending_tx.tx_hash();
+        tracing::info!("Settled match {}: {:?}", match_id, tx_hash);
 
-        Ok(tx_hash)
+        Ok(format!("{:?}", tx_hash))
     }
 
     /// Check if oracle is configured

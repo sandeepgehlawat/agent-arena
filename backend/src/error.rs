@@ -19,7 +19,7 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message, extra) = match self {
+        let (status, message, extra): (StatusCode, String, Option<serde_json::Value>) = match self {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg, None),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg, None),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg, None),

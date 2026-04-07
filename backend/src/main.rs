@@ -1,5 +1,4 @@
 use axum::{
-    middleware,
     routing::{get, post},
     Router,
 };
@@ -11,10 +10,13 @@ use tower_http::{
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod error;
-mod middleware as mw;
+mod middleware;
 mod models;
 mod routes;
 mod services;
+
+// Import our middleware module as mw
+use crate::middleware as mw;
 
 use services::{
     match_service::MatchService,
@@ -127,10 +129,10 @@ async fn main() {
             .route("/matches/challenge", post(routes::matches::create_challenge))
             .route("/matches/:match_id/accept", post(routes::matches::accept_challenge))
             .route("/matches/:match_id/trade", post(routes::matches::submit_trade))
-            .layer(middleware::from_fn(mw::verify_signature))
+            .layer(axum::middleware::from_fn(mw::verify_signature))
         )
         .with_state(state)
-        .layer(middleware::from_fn(mw::rate_limit))
+        .layer(axum::middleware::from_fn(mw::rate_limit))
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 

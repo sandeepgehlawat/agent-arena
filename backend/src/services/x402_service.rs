@@ -353,3 +353,302 @@ impl X402Service {
         !self.okx_api_key.is_empty() && !self.okx_api_secret.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_service() -> X402Service {
+        X402Service::new(
+            "test_api_key".to_string(),
+            "test_api_secret".to_string(),
+            "test_passphrase".to_string(),
+            "https://rpc.xlayer.tech".to_string(),
+            "0x74b7F16337b8972027F6196A17a631aC6dE26d22".to_string(),
+            "0x1234567890123456789012345678901234567890".to_string(),
+        )
+    }
+
+    fn create_unconfigured_service() -> X402Service {
+        X402Service::new(
+            String::new(),
+            String::new(),
+            String::new(),
+            "https://rpc.xlayer.tech".to_string(),
+            "0x74b7F16337b8972027F6196A17a631aC6dE26d22".to_string(),
+            "0x1234567890123456789012345678901234567890".to_string(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_create_payment_request() {
+        let service = create_test_service();
+
+        let result = service.create_payment_request(
+            5_000_000, // 5 USDC
+            "0x1234567890123456789012345678901234567890",
+            Some("test-match-1".to_string()),
+            Some(1),
+            Some("Entry fee".to_string()),
+        ).await;
+
+        assert!(result.is_ok());
+        let request = result.unwrap();
+
+        assert_eq!(request.network, "xlayer");
+        assert_eq!(request.token, "USDC");
+        assert_eq!(request.amount, 5_000_000);
+        assert!(!request.nonce.is_empty());
+        assert!(request.expires > 0);
+    }
+
+    #[tokio::test]
+    async fn test_nonce_uniqueness() {
+        let service = create_test_service();
+
+        let req1 = service.create_payment_request(
+            1_000_000,
+            "0x1234567890123456789012345678901234567890",
+            None,
+            None,
+            None,
+        ).await.unwrap();
+
+        let req2 = service.create_payment_request(
+            1_000_000,
+            "0x1234567890123456789012345678901234567890",
+            None,
+            None,
+            None,
+        ).await.unwrap();
+
+        // Each request should have a unique nonce
+        assert_ne!(req1.nonce, req2.nonce);
+    }
+
+    #[tokio::test]
+    async fn test_nonce_caching() {
+        let service = create_test_service();
+
+        let request = service.create_payment_request(
+            1_000_000,
+            "0x1234567890123456789012345678901234567890",
+            None,
+            None,
+            None,
+        ).await.unwrap();
+
+        // Should be able to retrieve the cached nonce
+        let cached = service.get_nonce(&request.nonce).await;
+        assert!(cached.is_some());
+
+        let cached = cached.unwrap();
+        assert_eq!(cached.amount, 1_000_000);
+        assert!(!cached.used);
+    }
+
+    #[tokio::test]
+    async fn test_verify_unknown_nonce() {
+        let service = create_test_service();
+
+        let proof = X402PaymentProof {
+            nonce: "unknown-nonce".to_string(),
+            tx_hash: "0x1234".to_string(),
+        };
+
+        let result = service.verify_payment(&proof).await.unwrap();
+        assert!(!result.valid);
+        assert!(result.error.unwrap().contains("Unknown nonce"));
+    }
+
+    #[tokio::test]
+    async fn test_verify_used_nonce() {
+        let service = create_test_service();
+
+        // Create a request and mark nonce as used
+        let request = service.create_payment_request(
+            1_000_000,
+            "0x1234567890123456789012345678901234567890",
+            None,
+            None,
+            None,
+        ).await.unwrap();
+
+        // Manually mark as used
+        {
+            let mut nonces = service.nonces.write().await;
+            if let Some(nonce) = nonces.get_mut(&request.nonce) {
+                nonce.used = true;
+            }
+        }
+
+        let proof = X402PaymentProof {
+            nonce: request.nonce.clone(),
+            tx_hash: "0x1234".to_string(),
+        };
+
+        let result = service.verify_payment(&proof).await.unwrap();
+        assert!(!result.valid);
+        assert!(result.error.unwrap().contains("already used"));
+    }
+
+    #[tokio::test]
+    async fn test_verify_expired_nonce() {
+        let service = create_test_service();
+
+        // Create a request and expire it
+        let request = service.create_payment_request(
+            1_000_000,
+            "0x1234567890123456789012345678901234567890",
+            None,
+            None,
+            None,
+        ).await.unwrap();
+
+        // Manually set expired timestamp
+        {
+            let mut nonces = service.nonces.write().await;
+            if let Some(nonce) = nonces.get_mut(&request.nonce) {
+                nonce.expires = 0; // Already expired
+            }
+        }
+
+        let proof = X402PaymentProof {
+            nonce: request.nonce.clone(),
+            tx_hash: "0x1234".to_string(),
+        };
+
+        let result = service.verify_payment(&proof).await.unwrap();
+        assert!(!result.valid);
+        assert!(result.error.unwrap().contains("expired"));
+    }
+
+    #[tokio::test]
+    async fn test_is_configured() {
+        let configured = create_test_service();
+        assert!(configured.is_configured());
+
+        let unconfigured = create_unconfigured_service();
+        assert!(!unconfigured.is_configured());
+    }
+
+    #[tokio::test]
+    async fn test_platform_wallet() {
+        let service = create_test_service();
+        assert_eq!(
+            service.platform_wallet(),
+            "0x1234567890123456789012345678901234567890"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_payment_request_expiry() {
+        let service = create_test_service();
+
+        let request = service.create_payment_request(
+            1_000_000,
+            "0x1234567890123456789012345678901234567890",
+            None,
+            None,
+            None,
+        ).await.unwrap();
+
+        // Expiry should be ~5 minutes in the future
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        assert!(request.expires > now);
+        assert!(request.expires <= now + 300);
+    }
+
+    #[tokio::test]
+    async fn test_nonce_format() {
+        let service = create_test_service();
+
+        let request = service.create_payment_request(
+            1_000_000,
+            "0x1234567890123456789012345678901234567890",
+            None,
+            None,
+            None,
+        ).await.unwrap();
+
+        // Nonce should be 32-char hex string
+        assert_eq!(request.nonce.len(), 32);
+        assert!(request.nonce.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[tokio::test]
+    async fn test_sign_okx_request() {
+        let service = create_test_service();
+
+        let signature = service.sign_okx_request("test message");
+        assert!(signature.is_ok());
+
+        let sig = signature.unwrap();
+        // Should be base64 encoded
+        assert!(!sig.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_payment_nonce_struct() {
+        let nonce = PaymentNonce {
+            nonce: "test-nonce".to_string(),
+            recipient: "0x1234".to_string(),
+            amount: 1_000_000,
+            expires: 12345,
+            used: false,
+            created_at: 12300,
+            match_id: Some("match-1".to_string()),
+            agent_id: Some(1),
+        };
+
+        // Test Clone
+        let cloned = nonce.clone();
+        assert_eq!(cloned.nonce, nonce.nonce);
+        assert_eq!(cloned.amount, nonce.amount);
+    }
+
+    #[tokio::test]
+    async fn test_x402_verification_result() {
+        let valid_result = X402VerificationResult {
+            valid: true,
+            amount_paid: 5_000_000,
+            recipient: "0x1234".to_string(),
+            error: None,
+        };
+        assert!(valid_result.valid);
+        assert!(valid_result.error.is_none());
+
+        let invalid_result = X402VerificationResult {
+            valid: false,
+            amount_paid: 0,
+            recipient: String::new(),
+            error: Some("Test error".to_string()),
+        };
+        assert!(!invalid_result.valid);
+        assert!(invalid_result.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_nonces_cleanup() {
+        let service = create_test_service();
+
+        // Create several requests
+        for _ in 0..5 {
+            let _ = service.create_payment_request(
+                1_000_000,
+                "0x1234567890123456789012345678901234567890",
+                None,
+                None,
+                None,
+            ).await;
+        }
+
+        // All should be cached
+        let nonces = service.nonces.read().await;
+        assert_eq!(nonces.len(), 5);
+    }
+}

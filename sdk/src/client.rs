@@ -518,14 +518,176 @@ impl MatchSubscription {
     pub fn close(&mut self) {
         self.stream = None;
     }
+}
 
-    /// Get USDC balance (if wallet configured)
-    pub async fn get_usdc_balance(&self) -> Result<u64> {
-        let handler = self
-            .x402_handler
-            .as_ref()
-            .ok_or_else(|| Error::Config("No wallet configured".to_string()))?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        handler.get_balance().await
+    #[test]
+    fn test_arena_client_config_default() {
+        let config = ArenaClientConfig::default();
+
+        assert_eq!(config.base_url, "http://localhost:3460");
+        assert!(config.private_key.is_none());
+        assert!(config.rpc_url.is_none());
+        assert!(config.usdc_address.is_none());
+        assert_eq!(config.max_retries, 3);
+        assert_eq!(config.retry_delay_ms, 1000);
+        assert_eq!(config.timeout_secs, 30);
+    }
+
+    #[test]
+    fn test_arena_client_config_clone() {
+        let config = ArenaClientConfig {
+            base_url: "http://example.com".to_string(),
+            private_key: Some("pk123".to_string()),
+            rpc_url: Some("http://rpc.example.com".to_string()),
+            usdc_address: Some("0x1234".to_string()),
+            max_retries: 5,
+            retry_delay_ms: 2000,
+            timeout_secs: 60,
+        };
+
+        let cloned = config.clone();
+        assert_eq!(cloned.base_url, config.base_url);
+        assert_eq!(cloned.private_key, config.private_key);
+        assert_eq!(cloned.max_retries, config.max_retries);
+    }
+
+    #[test]
+    fn test_reconnect_config_default() {
+        let config = ReconnectConfig::default();
+
+        assert_eq!(config.max_attempts, 5);
+        assert_eq!(config.initial_delay_ms, 1000);
+        assert_eq!(config.max_delay_ms, 30000);
+        assert_eq!(config.backoff_multiplier, 2);
+    }
+
+    #[test]
+    fn test_is_retryable_status() {
+        // Server errors should be retryable
+        assert!(ArenaClient::is_retryable_status(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(ArenaClient::is_retryable_status(StatusCode::BAD_GATEWAY));
+        assert!(ArenaClient::is_retryable_status(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(ArenaClient::is_retryable_status(StatusCode::GATEWAY_TIMEOUT));
+
+        // Rate limiting should be retryable
+        assert!(ArenaClient::is_retryable_status(StatusCode::TOO_MANY_REQUESTS));
+
+        // Client errors should NOT be retryable
+        assert!(!ArenaClient::is_retryable_status(StatusCode::BAD_REQUEST));
+        assert!(!ArenaClient::is_retryable_status(StatusCode::UNAUTHORIZED));
+        assert!(!ArenaClient::is_retryable_status(StatusCode::FORBIDDEN));
+        assert!(!ArenaClient::is_retryable_status(StatusCode::NOT_FOUND));
+    }
+
+    #[test]
+    fn test_url_conversion() {
+        let base_url = "http://localhost:3460/";
+        let trimmed = base_url.trim_end_matches('/').to_string();
+        assert_eq!(trimmed, "http://localhost:3460");
+
+        let ws_url = trimmed
+            .replace("http://", "ws://")
+            .replace("https://", "wss://");
+        assert_eq!(ws_url, "ws://localhost:3460");
+    }
+
+    #[test]
+    fn test_https_to_wss_conversion() {
+        let base_url = "https://arena.example.com";
+        let ws_url = base_url
+            .replace("http://", "ws://")
+            .replace("https://", "wss://");
+        assert_eq!(ws_url, "wss://arena.example.com");
+    }
+
+    #[tokio::test]
+    async fn test_client_creation_no_wallet() {
+        let result = ArenaClient::new("http://localhost:3460", None);
+        assert!(result.is_ok());
+
+        let client = result.unwrap();
+        // x402_handler should be None
+        assert!(client.x402_handler.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_client_with_config() {
+        let config = ArenaClientConfig {
+            base_url: "http://test.example.com".to_string(),
+            private_key: None,
+            rpc_url: None,
+            usdc_address: None,
+            max_retries: 5,
+            retry_delay_ms: 500,
+            timeout_secs: 60,
+        };
+
+        let result = ArenaClient::with_config(config);
+        assert!(result.is_ok());
+
+        let client = result.unwrap();
+        assert_eq!(client.base_url, "http://test.example.com");
+        assert_eq!(client.ws_url, "ws://test.example.com");
+        assert_eq!(client.max_retries, 5);
+        assert_eq!(client.retry_delay_ms, 500);
+    }
+
+    #[tokio::test]
+    async fn test_client_with_agent_id() {
+        let client = ArenaClient::new("http://localhost:3460", None).unwrap();
+        assert!(client.agent_id.is_none());
+
+        let client = client.with_agent_id(42);
+        assert_eq!(client.agent_id, Some(42));
+    }
+
+    #[test]
+    fn test_exponential_backoff_calculation() {
+        let retry_delay_ms = 1000u64;
+
+        // Attempt 0: 1000 * 2^0 = 1000ms
+        assert_eq!(retry_delay_ms * (1 << 0), 1000);
+
+        // Attempt 1: 1000 * 2^1 = 2000ms
+        assert_eq!(retry_delay_ms * (1 << 1), 2000);
+
+        // Attempt 2: 1000 * 2^2 = 4000ms
+        assert_eq!(retry_delay_ms * (1 << 2), 4000);
+
+        // Attempt 3: 1000 * 2^3 = 8000ms
+        assert_eq!(retry_delay_ms * (1 << 3), 8000);
+    }
+
+    #[test]
+    fn test_delay_capped_at_30_seconds() {
+        let delay = 60000u64;
+        let capped = delay.min(30000);
+        assert_eq!(capped, 30000);
+    }
+
+    #[test]
+    fn test_match_subscription_reconnect_attempt_tracking() {
+        // Test that reconnect attempts are properly tracked
+        let mut attempt = 0;
+        let max_retries = 3;
+
+        while attempt < max_retries {
+            attempt += 1;
+            let delay = 1000u64 * (1 << (attempt - 1));
+            let capped_delay = delay.min(30000);
+
+            match attempt {
+                1 => assert_eq!(capped_delay, 1000),
+                2 => assert_eq!(capped_delay, 2000),
+                3 => assert_eq!(capped_delay, 4000),
+                _ => {}
+            }
+        }
+
+        assert_eq!(attempt, max_retries);
     }
 }

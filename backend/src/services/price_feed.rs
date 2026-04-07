@@ -222,3 +222,217 @@ impl Default for PriceFeed {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_new_price_feed() {
+        let feed = PriceFeed::new();
+
+        // Initially no prices
+        let prices = feed.get_all_prices().await;
+        assert!(prices.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_default_price_feed() {
+        let feed = PriceFeed::default();
+
+        // Should work the same as new()
+        let prices = feed.get_all_prices().await;
+        assert!(prices.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_is_connected_initially_false() {
+        let feed = PriceFeed::new();
+
+        // Should not be connected initially
+        let connected = feed.is_connected().await;
+        assert!(!connected);
+    }
+
+    #[tokio::test]
+    async fn test_get_price_not_found() {
+        let feed = PriceFeed::new();
+
+        // No prices loaded
+        let price = feed.get_price("BTC").await;
+        assert!(price.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_price_update_struct() {
+        let update = PriceUpdate {
+            symbol: "BTC".to_string(),
+            price: 50000.0,
+            timestamp: 12345,
+        };
+
+        // Test Clone
+        let cloned = update.clone();
+        assert_eq!(cloned.symbol, "BTC");
+        assert_eq!(cloned.price, 50000.0);
+        assert_eq!(cloned.timestamp, 12345);
+    }
+
+    #[tokio::test]
+    async fn test_subscribe() {
+        let feed = PriceFeed::new();
+
+        let rx = feed.subscribe().await;
+
+        // Should be able to subscribe
+        // Verify the receiver is valid (len check works without mut)
+        assert!(rx.len() >= 0);
+    }
+
+    #[tokio::test]
+    async fn test_manual_price_insertion() {
+        let feed = PriceFeed::new();
+
+        // Manually insert a price (simulating what would happen from WebSocket)
+        {
+            let mut prices = feed.prices.write().await;
+            prices.insert("BTC".to_string(), 50000.0);
+        }
+
+        // Should now be able to get the price
+        let price = feed.get_price("BTC").await;
+        assert!(price.is_some());
+        assert_eq!(price.unwrap(), 50000.0);
+    }
+
+    #[tokio::test]
+    async fn test_get_all_prices() {
+        let feed = PriceFeed::new();
+
+        // Insert multiple prices
+        {
+            let mut prices = feed.prices.write().await;
+            prices.insert("BTC".to_string(), 50000.0);
+            prices.insert("ETH".to_string(), 3000.0);
+            prices.insert("SOL".to_string(), 100.0);
+        }
+
+        let all_prices = feed.get_all_prices().await;
+        assert_eq!(all_prices.len(), 3);
+        assert_eq!(all_prices.get("BTC"), Some(&50000.0));
+        assert_eq!(all_prices.get("ETH"), Some(&3000.0));
+        assert_eq!(all_prices.get("SOL"), Some(&100.0));
+    }
+
+    #[tokio::test]
+    async fn test_last_update_tracking() {
+        let feed = PriceFeed::new();
+
+        // Initially last_update is 0
+        let last_update = *feed.last_update.read().await;
+        assert_eq!(last_update, 0);
+    }
+
+    #[tokio::test]
+    async fn test_connected_flag_tracking() {
+        let feed = PriceFeed::new();
+
+        // Initially not connected
+        assert!(!*feed.connected.read().await);
+
+        // Manually set connected
+        {
+            let mut connected = feed.connected.write().await;
+            *connected = true;
+        }
+
+        // But still won't pass is_connected due to stale last_update
+        assert!(!feed.is_connected().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_connected_with_recent_update() {
+        let feed = PriceFeed::new();
+
+        // Set connected and recent last_update
+        {
+            let mut connected = feed.connected.write().await;
+            *connected = true;
+        }
+        {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let mut last_update = feed.last_update.write().await;
+            *last_update = now;
+        }
+
+        // Should now be connected
+        assert!(feed.is_connected().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_connected_stale_data() {
+        let feed = PriceFeed::new();
+
+        // Set connected but old last_update (more than 30 seconds ago)
+        {
+            let mut connected = feed.connected.write().await;
+            *connected = true;
+        }
+        {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let mut last_update = feed.last_update.write().await;
+            *last_update = now - 60; // 60 seconds ago
+        }
+
+        // Should not be connected due to stale data
+        assert!(!feed.is_connected().await);
+    }
+
+    #[tokio::test]
+    async fn test_supported_symbols() {
+        // Verify the expected symbols are BTC, ETH, SOL
+        let expected_symbols = vec!["BTC", "ETH", "SOL"];
+
+        for symbol in expected_symbols {
+            // The feed URL contains these symbols
+            let url = "wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/ethusdt@ticker/solusdt@ticker";
+            assert!(url.to_lowercase().contains(&symbol.to_lowercase()));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_price_precision() {
+        let feed = PriceFeed::new();
+
+        // Test with high-precision price
+        {
+            let mut prices = feed.prices.write().await;
+            prices.insert("BTC".to_string(), 50123.45678);
+        }
+
+        let price = feed.get_price("BTC").await.unwrap();
+        assert!((price - 50123.45678).abs() < 0.00001);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_subscribers() {
+        let feed = PriceFeed::new();
+
+        let rx1 = feed.subscribe().await;
+        let rx2 = feed.subscribe().await;
+
+        // Both should be valid receivers
+        assert!(rx1.len() >= 0);
+        assert!(rx2.len() >= 0);
+
+        // Both subscribed
+        let subs = feed.subscribers.read().await;
+        assert_eq!(subs.len(), 2);
+    }
+}

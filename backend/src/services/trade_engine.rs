@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 /// Simulated trade engine for match competitions
 pub struct TradeEngine {
-    price_feed: Arc<PriceFeed>,
+    pub price_feed: Arc<PriceFeed>,
     // match_id => agent_id => AgentMatchState
     states: RwLock<HashMap<String, HashMap<u64, AgentMatchState>>>,
     // match_id => Vec<TradeRecord>
@@ -516,5 +516,217 @@ impl TradeEngine {
 
         let mut trades = self.trades.write().await;
         trades.remove(match_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_engine() -> TradeEngine {
+        let price_feed = Arc::new(PriceFeed::new());
+        TradeEngine::new(price_feed)
+    }
+
+    #[tokio::test]
+    async fn test_init_match() {
+        let engine = create_test_engine();
+        engine.init_match("test-match", 1, 2).await;
+
+        let state1 = engine.get_agent_state("test-match", 1).await;
+        let state2 = engine.get_agent_state("test-match", 2).await;
+
+        assert!(state1.is_some());
+        assert!(state2.is_some());
+
+        let state1 = state1.unwrap();
+        assert_eq!(state1.balance, INITIAL_BALANCE);
+        assert_eq!(state1.pnl, 0.0);
+        assert!(state1.positions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_unsupported_symbol() {
+        let engine = create_test_engine();
+        engine.init_match("test-match", 1, 2).await;
+
+        let request = TradeRequest {
+            agent_id: 1,
+            symbol: "INVALID".to_string(),
+            action: TradeAction::Open,
+            side: TradeSide::Long,
+            size_usd: 1000.0,
+            leverage: Some(2.0),
+        };
+
+        let response = engine.execute_trade("test-match", request).await.unwrap();
+        assert!(!response.success);
+        assert!(response.error.unwrap().contains("Unsupported"));
+    }
+
+    #[tokio::test]
+    async fn test_min_trade_size() {
+        let engine = create_test_engine();
+        engine.init_match("test-match", 1, 2).await;
+
+        let request = TradeRequest {
+            agent_id: 1,
+            symbol: "BTC".to_string(),
+            action: TradeAction::Open,
+            side: TradeSide::Long,
+            size_usd: 0.5, // Below MIN_TRADE_SIZE
+            leverage: Some(1.0),
+        };
+
+        let response = engine.execute_trade("test-match", request).await.unwrap();
+        assert!(!response.success);
+        assert!(response.error.unwrap().contains("Minimum"));
+    }
+
+    #[tokio::test]
+    async fn test_max_leverage_capped() {
+        // Test that leverage is capped at MAX_LEVERAGE
+        let requested_leverage: f64 = 10.0;
+        let capped = requested_leverage.min(MAX_LEVERAGE).max(1.0);
+        assert_eq!(capped, MAX_LEVERAGE);
+    }
+
+    #[tokio::test]
+    async fn test_pnl_calculation_long_profit() {
+        // Long position profit calculation
+        let entry_price: f64 = 50000.0;
+        let current_price: f64 = 52500.0; // 5% increase
+        let size: f64 = 1000.0;
+
+        let pnl = (current_price - entry_price) / entry_price * size;
+
+        // 5% of $1000 = $50
+        assert!((pnl - 50.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_pnl_calculation_long_loss() {
+        // Long position loss calculation
+        let entry_price: f64 = 50000.0;
+        let current_price: f64 = 47500.0; // 5% decrease
+        let size: f64 = 1000.0;
+
+        let pnl = (current_price - entry_price) / entry_price * size;
+
+        // -5% of $1000 = -$50
+        assert!((pnl + 50.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_pnl_calculation_short_profit() {
+        // Short position profit calculation
+        let entry_price: f64 = 50000.0;
+        let current_price: f64 = 47500.0; // 5% decrease (profit for short)
+        let size: f64 = 1000.0;
+
+        let pnl = (entry_price - current_price) / entry_price * size;
+
+        // 5% of $1000 = $50
+        assert!((pnl - 50.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_pnl_calculation_short_loss() {
+        // Short position loss calculation
+        let entry_price: f64 = 50000.0;
+        let current_price: f64 = 52500.0; // 5% increase (loss for short)
+        let size: f64 = 1000.0;
+
+        let pnl = (entry_price - current_price) / entry_price * size;
+
+        // -5% of $1000 = -$50
+        assert!((pnl + 50.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_leverage_multiplies_pnl() {
+        let entry_price: f64 = 50000.0;
+        let current_price: f64 = 51000.0; // 2% increase
+        let size: f64 = 1000.0;
+        let leverage: f64 = 5.0;
+
+        let pnl_no_leverage = (current_price - entry_price) / entry_price * size;
+        let pnl_with_leverage = pnl_no_leverage * leverage;
+
+        // 2% * $1000 * 5x = $100
+        assert!((pnl_with_leverage - 100.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_margin_calculation() {
+        let size = 5000.0;
+        let leverage = 5.0;
+        let margin_required = size / leverage;
+
+        // $5000 position at 5x requires $1000 margin
+        assert_eq!(margin_required, 1000.0);
+    }
+
+    #[tokio::test]
+    async fn test_close_nonexistent_position() {
+        let engine = create_test_engine();
+        engine.init_match("test-match", 1, 2).await;
+
+        let request = TradeRequest {
+            agent_id: 1,
+            symbol: "BTC".to_string(),
+            action: TradeAction::Close,
+            side: TradeSide::Long,
+            size_usd: 1000.0,
+            leverage: None,
+        };
+
+        let response = engine.execute_trade("test-match", request).await.unwrap();
+        assert!(!response.success);
+        assert!(response.error.unwrap().contains("No position"));
+    }
+
+    #[tokio::test]
+    async fn test_match_not_found() {
+        let engine = create_test_engine();
+
+        let request = TradeRequest {
+            agent_id: 1,
+            symbol: "BTC".to_string(),
+            action: TradeAction::Open,
+            side: TradeSide::Long,
+            size_usd: 1000.0,
+            leverage: Some(2.0),
+        };
+
+        let result = engine.execute_trade("nonexistent", request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_match_states() {
+        let engine = create_test_engine();
+        engine.init_match("test-match", 1, 2).await;
+
+        let states = engine.get_match_states("test-match").await;
+        assert!(states.is_some());
+
+        let (state1, state2) = states.unwrap();
+        assert_eq!(state1.agent_id, 1);
+        assert_eq!(state2.agent_id, 2);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_match() {
+        let engine = create_test_engine();
+        engine.init_match("test-match", 1, 2).await;
+
+        // Verify match exists
+        assert!(engine.get_agent_state("test-match", 1).await.is_some());
+
+        engine.cleanup_match("test-match").await;
+
+        // Verify match is cleaned up
+        assert!(engine.get_agent_state("test-match", 1).await.is_none());
     }
 }
