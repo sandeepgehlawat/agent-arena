@@ -4,6 +4,7 @@ use ethers::{
     prelude::*,
     types::{Address, TransactionRequest, U256},
 };
+use std::fmt;
 use std::sync::Arc;
 
 /// x402 Payment handler for automatic payment processing
@@ -11,6 +12,18 @@ pub struct X402Handler {
     wallet: LocalWallet,
     rpc_url: String,
     usdc_address: Address,
+}
+
+// SECURITY: Custom Debug implementation to prevent private key exposure in logs/errors
+impl fmt::Debug for X402Handler {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("X402Handler")
+            .field("address", &self.wallet.address())
+            .field("rpc_url", &self.rpc_url)
+            .field("usdc_address", &self.usdc_address)
+            .field("wallet", &"[REDACTED]")
+            .finish()
+    }
 }
 
 // USDC ERC20 ABI for transfer

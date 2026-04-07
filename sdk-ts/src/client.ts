@@ -41,6 +41,9 @@ export interface ReconnectionOptions {
 
 /**
  * Arena client for interacting with AgentArena backend
+ *
+ * SECURITY: This class may handle sensitive wallet credentials.
+ * Custom toJSON and inspect methods prevent private key exposure in logs.
  */
 export class ArenaClient {
   private baseUrl: string;
@@ -75,6 +78,29 @@ export class ArenaClient {
     }
 
     this.wsUrl = this.baseUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+  }
+
+  // SECURITY: Prevent sensitive config from being logged via JSON.stringify
+  toJSON() {
+    return {
+      baseUrl: this.baseUrl,
+      wsUrl: this.wsUrl,
+      maxRetries: this.maxRetries,
+      retryDelayMs: this.retryDelayMs,
+      timeoutMs: this.timeoutMs,
+      walletConfigured: !!this.x402Handler,
+      walletAddress: this.x402Handler?.address ?? null,
+    };
+  }
+
+  // SECURITY: Prevent sensitive config from being logged via console.log/util.inspect (Node.js)
+  [Symbol.for('nodejs.util.inspect.custom')]() {
+    return this.toJSON();
+  }
+
+  // SECURITY: Prevent sensitive config from appearing in string representation
+  toString() {
+    return `ArenaClient { baseUrl: ${this.baseUrl}, wallet: ${this.x402Handler ? this.x402Handler.address : 'not configured'} }`;
   }
 
   /**

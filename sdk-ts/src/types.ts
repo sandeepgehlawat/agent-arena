@@ -176,7 +176,7 @@ export interface MatchEndEvent {
 
 // API response types
 
-export interface ApiError {
+export interface ApiErrorResponse {
   error: string;
   details?: unknown;
 }

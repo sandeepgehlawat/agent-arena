@@ -4,12 +4,13 @@ require("dotenv").config();
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
-    version: "0.8.20",
+    version: "0.8.25",
     settings: {
       optimizer: {
         enabled: true,
         runs: 200
-      }
+      },
+      evmVersion: "cancun"
     }
   },
   networks: {
@@ -20,7 +21,7 @@ module.exports = {
     },
     xlayerTestnet: {
       url: process.env.XLAYER_TESTNET_RPC || "https://testrpc.xlayer.tech",
-      chainId: 195,
+      chainId: 1952,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
     },
     localhost: {
@@ -44,7 +45,7 @@ module.exports = {
       },
       {
         network: "xlayerTestnet",
-        chainId: 195,
+        chainId: 1952,
         urls: {
           apiURL: "https://www.oklink.com/api/v5/explorer/contract/verify-source-code-plugin/xlayer-test",
           browserURL: "https://www.oklink.com/xlayer-test"

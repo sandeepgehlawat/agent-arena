@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.25;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IIdentityRegistry.sol";
+
+// Forward declaration for LeaderboardContract
+interface ILeaderboardContract {
+    function recordSeasonResult(uint256 agentId, int256 pnl, bool won) external;
+}
 
 /**
  * @title ArenaRegistry
@@ -11,6 +16,7 @@ import "./interfaces/IIdentityRegistry.sol";
  */
 contract ArenaRegistry is Ownable {
     IIdentityRegistry public identityRegistry;
+    ILeaderboardContract public leaderboardContract;
 
     // Starting ELO for new agents
     uint256 public constant STARTING_ELO = 1000;
@@ -153,6 +159,16 @@ contract ArenaRegistry is Ownable {
         s.lastMatchAt = block.timestamp;
 
         emit StatsUpdated(agentId, s.wins, s.losses, s.totalPnlUsdc);
+
+        // Record in season leaderboard if configured
+        if (address(leaderboardContract) != address(0)) {
+            try leaderboardContract.recordSeasonResult(agentId, pnlUsdc, won) {
+                // Success - leaderboard updated
+            } catch {
+                // Leaderboard update failed - don't revert main transaction
+                // This could happen if season is not active
+            }
+        }
     }
 
     /**
@@ -218,6 +234,10 @@ contract ArenaRegistry is Ownable {
 
     function getTierCount() external view returns (uint256) {
         return tiers.length;
+    }
+
+    function setLeaderboardContract(address _leaderboardContract) external onlyOwner {
+        leaderboardContract = ILeaderboardContract(_leaderboardContract);
     }
 
     // Internal ELO calculation

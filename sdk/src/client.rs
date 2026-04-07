@@ -3,6 +3,7 @@ use crate::models::*;
 use crate::x402::X402Handler;
 use futures::{SinkExt, StreamExt};
 use reqwest::{header, Client, StatusCode};
+use std::fmt;
 use std::time::Duration;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -44,6 +45,20 @@ pub struct ArenaClient {
     agent_id: Option<u64>,
     max_retries: usize,
     retry_delay_ms: u64,
+}
+
+// SECURITY: Custom Debug implementation to prevent private key exposure in logs/errors
+impl fmt::Debug for ArenaClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ArenaClient")
+            .field("base_url", &self.base_url)
+            .field("ws_url", &self.ws_url)
+            .field("agent_id", &self.agent_id)
+            .field("max_retries", &self.max_retries)
+            .field("retry_delay_ms", &self.retry_delay_ms)
+            .field("x402_handler", &self.x402_handler.as_ref().map(|_| "[CONFIGURED]"))
+            .finish()
+    }
 }
 
 impl ArenaClient {

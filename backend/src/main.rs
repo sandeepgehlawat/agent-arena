@@ -139,6 +139,9 @@ async fn main() {
         .route("/api/matches/:match_id/trades", get(routes::matches::get_trade_history))
         // WebSocket for live match updates
         .route("/ws/matches/:match_id", get(routes::ws::match_websocket))
+        // Demo routes (no auth - for testing only)
+        .route("/api/demo/create-match", post(routes::demo::create_demo_match))
+        .route("/api/demo/matches", get(routes::demo::list_demo_matches))
         // Protected routes (require signature)
         .nest("/api", Router::new()
             .route("/arena/register", post(routes::arena::register_for_arena))

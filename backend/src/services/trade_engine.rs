@@ -10,6 +10,12 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+/// Maintenance margin requirement (5% of position value)
+const MAINTENANCE_MARGIN_RATIO: f64 = 0.05;
+
+/// Liquidation penalty (2% of position value)
+const LIQUIDATION_PENALTY_RATIO: f64 = 0.02;
+
 /// Simulated trade engine for match competitions
 pub struct TradeEngine {
     pub price_feed: Arc<PriceFeed>,
@@ -58,6 +64,51 @@ impl TradeEngine {
 
         let mut trades = self.trades.write().await;
         trades.insert(match_id.to_string(), vec![]);
+    }
+
+    /// Calculate P&L for a position WITH LEVERAGE applied
+    fn calculate_pnl(pos: &Position, current_price: f64) -> f64 {
+        let price_change_pct = (current_price - pos.entry_price) / pos.entry_price;
+        let pnl = match pos.side {
+            PositionSide::Long => price_change_pct * pos.size * pos.leverage,
+            PositionSide::Short => -price_change_pct * pos.size * pos.leverage,
+        };
+        pnl
+    }
+
+    /// Calculate margin required for a position
+    fn calculate_margin_required(size: f64, leverage: f64) -> f64 {
+        size / leverage
+    }
+
+    /// Calculate maintenance margin for a position
+    fn calculate_maintenance_margin(pos: &Position) -> f64 {
+        pos.size * MAINTENANCE_MARGIN_RATIO
+    }
+
+    /// Check if agent should be liquidated
+    fn should_liquidate(state: &AgentMatchState) -> bool {
+        if state.positions.is_empty() {
+            return false;
+        }
+
+        // Calculate total maintenance margin required
+        let total_maintenance: f64 = state.positions
+            .iter()
+            .map(|p| Self::calculate_maintenance_margin(p))
+            .sum();
+
+        // Calculate total unrealized P&L
+        let total_unrealized_pnl: f64 = state.positions
+            .iter()
+            .map(|p| p.unrealized_pnl)
+            .sum();
+
+        // Calculate effective equity
+        let effective_equity = state.balance + total_unrealized_pnl;
+
+        // Liquidate if equity falls below maintenance margin
+        effective_equity < total_maintenance
     }
 
     /// Execute a trade
@@ -117,6 +168,22 @@ impl TradeEngine {
             .get_mut(&request.agent_id)
             .ok_or_else(|| AppError::NotFound("Agent not in match".to_string()))?;
 
+        // Check for liquidation before processing new trade
+        if Self::should_liquidate(state) {
+            return Ok(TradeResponse {
+                success: false,
+                trade_id: String::new(),
+                symbol: request.symbol,
+                side: request.side,
+                action: request.action,
+                size_usd: request.size_usd,
+                price,
+                realized_pnl: None,
+                new_balance: state.balance,
+                error: Some("Agent is in liquidation - cannot open new trades".to_string()),
+            });
+        }
+
         let trade_id = Uuid::new_v4().to_string();
         let mut realized_pnl: Option<f64> = None;
 
@@ -139,7 +206,7 @@ impl TradeEngine {
                 }
 
                 // Check balance (margin required = size / leverage)
-                let margin_required = request.size_usd / leverage;
+                let margin_required = Self::calculate_margin_required(request.size_usd, leverage);
                 if margin_required > state.balance {
                     return Ok(TradeResponse {
                         success: false,
@@ -151,7 +218,10 @@ impl TradeEngine {
                         price,
                         realized_pnl: None,
                         new_balance: state.balance,
-                        error: Some("Insufficient balance".to_string()),
+                        error: Some(format!(
+                            "Insufficient balance. Required: ${:.2}, Available: ${:.2}",
+                            margin_required, state.balance
+                        )),
                     });
                 }
 
@@ -198,18 +268,11 @@ impl TradeEngine {
                 if let Some(idx) = pos_idx {
                     let pos = state.positions.remove(idx);
 
-                    // Calculate P&L
-                    let pnl = match pos.side {
-                        PositionSide::Long => {
-                            (price - pos.entry_price) / pos.entry_price * pos.size
-                        }
-                        PositionSide::Short => {
-                            (pos.entry_price - price) / pos.entry_price * pos.size
-                        }
-                    };
+                    // Calculate P&L WITH LEVERAGE
+                    let pnl = Self::calculate_pnl(&pos, price);
 
                     // Return margin + P&L
-                    let margin = pos.size / pos.leverage;
+                    let margin = Self::calculate_margin_required(pos.size, pos.leverage);
                     state.balance += margin + pnl;
                     state.pnl += pnl;
                     realized_pnl = Some(pnl);
@@ -258,7 +321,7 @@ impl TradeEngine {
                     }
 
                     // Check margin
-                    let margin_required = request.size_usd / leverage;
+                    let margin_required = Self::calculate_margin_required(request.size_usd, leverage);
                     if margin_required > state.balance {
                         return Ok(TradeResponse {
                             success: false,
@@ -290,12 +353,15 @@ impl TradeEngine {
                         });
                     }
 
-                    // Calculate new average entry
+                    // Calculate new average entry and leverage
                     let old_cost = pos.size;
                     let new_cost = request.size_usd;
                     let total_size = old_cost + new_cost;
                     pos.entry_price =
                         (pos.entry_price * old_cost + price * new_cost) / total_size;
+
+                    // Use weighted average for leverage
+                    pos.leverage = (pos.leverage * old_cost + leverage * new_cost) / total_size;
                     pos.size = total_size;
 
                     state.balance -= margin_required;
@@ -325,21 +391,14 @@ impl TradeEngine {
                     let close_size = request.size_usd.min(pos.size);
                     let close_ratio = close_size / pos.size;
 
-                    // Calculate partial P&L
-                    let pnl = match pos.side {
-                        PositionSide::Long => {
-                            (price - pos.entry_price) / pos.entry_price * close_size
-                        }
-                        PositionSide::Short => {
-                            (pos.entry_price - price) / pos.entry_price * close_size
-                        }
-                    };
+                    // Calculate partial P&L WITH LEVERAGE
+                    let partial_pnl = Self::calculate_pnl(pos, price) * close_ratio;
 
                     // Return partial margin + P&L
-                    let margin_return = close_size / pos.leverage;
-                    state.balance += margin_return + pnl;
-                    state.pnl += pnl;
-                    realized_pnl = Some(pnl);
+                    let margin_return = Self::calculate_margin_required(close_size, pos.leverage);
+                    state.balance += margin_return + partial_pnl;
+                    state.pnl += partial_pnl;
+                    realized_pnl = Some(partial_pnl);
 
                     pos.size -= close_size;
 
@@ -409,25 +468,43 @@ impl TradeEngine {
         })
     }
 
-    /// Update all positions with current prices
+    /// Update all positions with current prices and check for liquidation
     pub async fn update_positions(&self, match_id: &str) -> Result<()> {
         let mut states = self.states.write().await;
         let match_states = states.get_mut(match_id).ok_or_else(|| {
             AppError::NotFound("Match not found".to_string())
         })?;
 
-        for state in match_states.values_mut() {
+        for (agent_id, state) in match_states.iter_mut() {
+            // Update unrealized P&L for each position
             for pos in &mut state.positions {
                 if let Some(price) = self.price_feed.get_price(&pos.symbol).await {
                     pos.current_price = price;
-                    pos.unrealized_pnl = match pos.side {
-                        PositionSide::Long => {
-                            (price - pos.entry_price) / pos.entry_price * pos.size
-                        }
-                        PositionSide::Short => {
-                            (pos.entry_price - price) / pos.entry_price * pos.size
-                        }
-                    };
+                    // Apply leverage to unrealized P&L
+                    pos.unrealized_pnl = Self::calculate_pnl(pos, price);
+                }
+            }
+
+            // Check for liquidation
+            if Self::should_liquidate(state) {
+                tracing::warn!(
+                    "Agent {} in match {} is being liquidated",
+                    agent_id,
+                    match_id
+                );
+
+                // Force close all positions
+                let positions_to_close: Vec<_> = state.positions.drain(..).collect();
+                for pos in positions_to_close {
+                    let price = self.price_feed.get_price(&pos.symbol).await.unwrap_or(pos.current_price);
+                    let pnl = Self::calculate_pnl(&pos, price);
+                    let margin = Self::calculate_margin_required(pos.size, pos.leverage);
+
+                    // Apply liquidation penalty
+                    let penalty = pos.size * LIQUIDATION_PENALTY_RATIO;
+
+                    state.balance += margin + pnl - penalty;
+                    state.pnl += pnl - penalty;
                 }
             }
         }
@@ -471,7 +548,7 @@ impl TradeEngine {
         let mut results: Vec<(u64, i64)> = vec![];
 
         for (agent_id, state) in match_states.iter_mut() {
-            // Close each position at current price
+            // Close each position at current price WITH LEVERAGE
             for pos in state.positions.drain(..) {
                 let price = self
                     .price_feed
@@ -479,12 +556,9 @@ impl TradeEngine {
                     .await
                     .unwrap_or(pos.current_price);
 
-                let pnl = match pos.side {
-                    PositionSide::Long => (price - pos.entry_price) / pos.entry_price * pos.size,
-                    PositionSide::Short => (pos.entry_price - price) / pos.entry_price * pos.size,
-                };
+                let pnl = Self::calculate_pnl(&pos, price);
+                let margin = Self::calculate_margin_required(pos.size, pos.leverage);
 
-                let margin = pos.size / pos.leverage;
                 state.balance += margin + pnl;
                 state.pnl += pnl;
             }
@@ -545,6 +619,133 @@ mod tests {
         assert!(state1.positions.is_empty());
     }
 
+    #[test]
+    fn test_pnl_calculation_long_with_leverage() {
+        let pos = Position {
+            symbol: "BTC".to_string(),
+            side: PositionSide::Long,
+            size: 1000.0,
+            entry_price: 50000.0,
+            current_price: 52500.0, // 5% increase
+            unrealized_pnl: 0.0,
+            leverage: 5.0,
+        };
+
+        let pnl = TradeEngine::calculate_pnl(&pos, 52500.0);
+
+        // 5% * $1000 * 5x leverage = $250
+        assert!((pnl - 250.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_pnl_calculation_short_with_leverage() {
+        let pos = Position {
+            symbol: "BTC".to_string(),
+            side: PositionSide::Short,
+            size: 1000.0,
+            entry_price: 50000.0,
+            current_price: 47500.0, // 5% decrease (profit for short)
+            unrealized_pnl: 0.0,
+            leverage: 3.0,
+        };
+
+        let pnl = TradeEngine::calculate_pnl(&pos, 47500.0);
+
+        // 5% * $1000 * 3x leverage = $150
+        assert!((pnl - 150.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_pnl_calculation_long_loss_with_leverage() {
+        let pos = Position {
+            symbol: "BTC".to_string(),
+            side: PositionSide::Long,
+            size: 1000.0,
+            entry_price: 50000.0,
+            current_price: 45000.0, // 10% decrease
+            unrealized_pnl: 0.0,
+            leverage: 5.0,
+        };
+
+        let pnl = TradeEngine::calculate_pnl(&pos, 45000.0);
+
+        // -10% * $1000 * 5x leverage = -$500
+        assert!((pnl + 500.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_margin_calculation() {
+        let margin = TradeEngine::calculate_margin_required(5000.0, 5.0);
+        assert_eq!(margin, 1000.0); // $5000 at 5x = $1000 margin
+
+        let margin = TradeEngine::calculate_margin_required(10000.0, 1.0);
+        assert_eq!(margin, 10000.0); // $10000 at 1x = $10000 margin
+    }
+
+    #[test]
+    fn test_maintenance_margin_calculation() {
+        let pos = Position {
+            symbol: "BTC".to_string(),
+            side: PositionSide::Long,
+            size: 1000.0,
+            entry_price: 50000.0,
+            current_price: 50000.0,
+            unrealized_pnl: 0.0,
+            leverage: 5.0,
+        };
+
+        let maintenance = TradeEngine::calculate_maintenance_margin(&pos);
+        assert_eq!(maintenance, 50.0); // 5% of $1000 = $50
+    }
+
+    #[test]
+    fn test_should_liquidate_healthy() {
+        let state = AgentMatchState {
+            agent_id: 1,
+            balance: 5000.0,
+            positions: vec![
+                Position {
+                    symbol: "BTC".to_string(),
+                    side: PositionSide::Long,
+                    size: 1000.0,
+                    entry_price: 50000.0,
+                    current_price: 50000.0,
+                    unrealized_pnl: 0.0,
+                    leverage: 5.0,
+                }
+            ],
+            pnl: 0.0,
+            trades_count: 1,
+        };
+
+        // Balance ($5000) >> maintenance margin ($50)
+        assert!(!TradeEngine::should_liquidate(&state));
+    }
+
+    #[test]
+    fn test_should_liquidate_underwater() {
+        let state = AgentMatchState {
+            agent_id: 1,
+            balance: 10.0, // Very low balance
+            positions: vec![
+                Position {
+                    symbol: "BTC".to_string(),
+                    side: PositionSide::Long,
+                    size: 1000.0,
+                    entry_price: 50000.0,
+                    current_price: 45000.0, // 10% loss
+                    unrealized_pnl: -500.0, // -$500 with 5x leverage
+                    leverage: 5.0,
+                }
+            ],
+            pnl: 0.0,
+            trades_count: 1,
+        };
+
+        // Effective equity: $10 - $500 = -$490, maintenance = $50
+        assert!(TradeEngine::should_liquidate(&state));
+    }
+
     #[tokio::test]
     async fn test_unsupported_symbol() {
         let engine = create_test_engine();
@@ -589,82 +790,6 @@ mod tests {
         let requested_leverage: f64 = 10.0;
         let capped = requested_leverage.min(MAX_LEVERAGE).max(1.0);
         assert_eq!(capped, MAX_LEVERAGE);
-    }
-
-    #[tokio::test]
-    async fn test_pnl_calculation_long_profit() {
-        // Long position profit calculation
-        let entry_price: f64 = 50000.0;
-        let current_price: f64 = 52500.0; // 5% increase
-        let size: f64 = 1000.0;
-
-        let pnl = (current_price - entry_price) / entry_price * size;
-
-        // 5% of $1000 = $50
-        assert!((pnl - 50.0).abs() < 0.01);
-    }
-
-    #[tokio::test]
-    async fn test_pnl_calculation_long_loss() {
-        // Long position loss calculation
-        let entry_price: f64 = 50000.0;
-        let current_price: f64 = 47500.0; // 5% decrease
-        let size: f64 = 1000.0;
-
-        let pnl = (current_price - entry_price) / entry_price * size;
-
-        // -5% of $1000 = -$50
-        assert!((pnl + 50.0).abs() < 0.01);
-    }
-
-    #[tokio::test]
-    async fn test_pnl_calculation_short_profit() {
-        // Short position profit calculation
-        let entry_price: f64 = 50000.0;
-        let current_price: f64 = 47500.0; // 5% decrease (profit for short)
-        let size: f64 = 1000.0;
-
-        let pnl = (entry_price - current_price) / entry_price * size;
-
-        // 5% of $1000 = $50
-        assert!((pnl - 50.0).abs() < 0.01);
-    }
-
-    #[tokio::test]
-    async fn test_pnl_calculation_short_loss() {
-        // Short position loss calculation
-        let entry_price: f64 = 50000.0;
-        let current_price: f64 = 52500.0; // 5% increase (loss for short)
-        let size: f64 = 1000.0;
-
-        let pnl = (entry_price - current_price) / entry_price * size;
-
-        // -5% of $1000 = -$50
-        assert!((pnl + 50.0).abs() < 0.01);
-    }
-
-    #[tokio::test]
-    async fn test_leverage_multiplies_pnl() {
-        let entry_price: f64 = 50000.0;
-        let current_price: f64 = 51000.0; // 2% increase
-        let size: f64 = 1000.0;
-        let leverage: f64 = 5.0;
-
-        let pnl_no_leverage = (current_price - entry_price) / entry_price * size;
-        let pnl_with_leverage = pnl_no_leverage * leverage;
-
-        // 2% * $1000 * 5x = $100
-        assert!((pnl_with_leverage - 100.0).abs() < 0.01);
-    }
-
-    #[tokio::test]
-    async fn test_margin_calculation() {
-        let size = 5000.0;
-        let leverage = 5.0;
-        let margin_required = size / leverage;
-
-        // $5000 position at 5x requires $1000 margin
-        assert_eq!(margin_required, 1000.0);
     }
 
     #[tokio::test]

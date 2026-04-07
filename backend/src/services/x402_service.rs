@@ -7,7 +7,7 @@ use base64::Engine;
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use sha2::Sha256;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
@@ -25,6 +25,8 @@ pub struct X402Service {
     platform_wallet: String,
     http_client: Client,
     nonces: Arc<RwLock<HashMap<String, PaymentNonce>>>,
+    /// Track used transaction hashes to prevent replay attacks
+    used_tx_hashes: Arc<RwLock<HashSet<String>>>,
 }
 
 impl X402Service {
@@ -45,6 +47,7 @@ impl X402Service {
             platform_wallet,
             http_client: Client::new(),
             nonces: Arc::new(RwLock::new(HashMap::new())),
+            used_tx_hashes: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -99,6 +102,20 @@ impl X402Service {
 
     /// Verify a payment proof
     pub async fn verify_payment(&self, proof: &X402PaymentProof) -> Result<X402VerificationResult> {
+        // CRITICAL: Check if transaction hash has already been used (prevent replay attack)
+        {
+            let used_hashes = self.used_tx_hashes.read().await;
+            let tx_hash_normalized = proof.tx_hash.to_lowercase();
+            if used_hashes.contains(&tx_hash_normalized) {
+                return Ok(X402VerificationResult {
+                    valid: false,
+                    amount_paid: 0,
+                    recipient: String::new(),
+                    error: Some("Transaction hash already used (replay attack prevented)".to_string()),
+                });
+            }
+        }
+
         let mut nonces = self.nonces.write().await;
         let cached = nonces.get_mut(&proof.nonce);
 
@@ -150,7 +167,14 @@ impl X402Service {
             });
         }
 
+        // Mark nonce as used
         cached.used = true;
+
+        // CRITICAL: Record transaction hash as used AFTER successful verification
+        {
+            let mut used_hashes = self.used_tx_hashes.write().await;
+            used_hashes.insert(proof.tx_hash.to_lowercase());
+        }
 
         Ok(X402VerificationResult {
             valid: true,
@@ -158,6 +182,18 @@ impl X402Service {
             recipient: cached.recipient.clone(),
             error: None,
         })
+    }
+
+    /// Check if a transaction hash has been used
+    pub async fn is_tx_hash_used(&self, tx_hash: &str) -> bool {
+        let used_hashes = self.used_tx_hashes.read().await;
+        used_hashes.contains(&tx_hash.to_lowercase())
+    }
+
+    /// Get count of used transaction hashes (for monitoring)
+    pub async fn used_tx_count(&self) -> usize {
+        let used_hashes = self.used_tx_hashes.read().await;
+        used_hashes.len()
     }
 
     /// Get payment nonce details

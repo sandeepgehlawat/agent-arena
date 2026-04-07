@@ -9,8 +9,22 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from 'recharts'
-import { TrendingUp, TrendingDown, Clock, Zap, WifiOff, Loader2, Activity, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import {
+  TrendingUp,
+  TrendingDown,
+  Clock,
+  Zap,
+  WifiOff,
+  Loader2,
+  Activity,
+  ArrowUpRight,
+  ArrowDownRight,
+  Target,
+  Shield,
+  AlertTriangle,
+} from 'lucide-react'
 
 interface Position {
   symbol: string
@@ -57,14 +71,11 @@ interface TradeEvent {
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3460'
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3460'
 
-// WebSocket connection states
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
 
 export function LiveMatchView({ matchId }: { matchId: string }) {
   const [matchState, setMatchState] = useState<MatchState | null>(null)
-  const [pnlHistory, setPnlHistory] = useState<
-    Array<{ time: number; agent1: number; agent2: number }>
-  >([])
+  const [pnlHistory, setPnlHistory] = useState<Array<{ time: number; agent1: number; agent2: number }>>([])
   const [tradeActivity, setTradeActivity] = useState<TradeEvent[]>([])
   const [error, setError] = useState<string | null>(null)
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
@@ -73,7 +84,6 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
   const reconnectAttemptRef = useRef(0)
   const maxReconnectAttempts = 5
 
-  // Fetch initial state via REST
   const fetchInitialState = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/api/matches/${matchId}/state`)
@@ -87,7 +97,6 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
     }
   }, [matchId])
 
-  // Connect to WebSocket with reconnection logic
   const connectWebSocket = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
@@ -106,19 +115,15 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
         const data = JSON.parse(event.data)
         if (data.type === 'state') {
           setMatchState(data.data)
-          // Update P&L history
-          setPnlHistory(prev => {
+          setPnlHistory((prev) => {
             const newPoint = {
               time: prev.length,
               agent1: data.data.agent1State.pnl,
               agent2: data.data.agent2State.pnl,
             }
-            // Keep last 60 data points (1 minute at 1 update/sec)
-            const updated = [...prev, newPoint].slice(-60)
-            return updated
+            return [...prev, newPoint].slice(-120) // 2 minutes of data
           })
         } else if (data.type === 'trade') {
-          // Add to trade activity feed
           const trade: TradeEvent = {
             agentId: data.data.agent_id,
             tradeId: data.data.trade_id,
@@ -133,7 +138,7 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
             newPnl: data.data.new_pnl,
             timestamp: data.data.timestamp || Date.now() / 1000,
           }
-          setTradeActivity(prev => [trade, ...prev].slice(0, 50)) // Keep last 50 trades
+          setTradeActivity((prev) => [trade, ...prev].slice(0, 50))
         } else if (data.type === 'ended') {
           setConnectionState('disconnected')
         }
@@ -149,7 +154,6 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
     ws.onclose = () => {
       wsRef.current = null
 
-      // Don't reconnect if match ended or we've exceeded attempts
       if (matchState?.status === 'Completed' || matchState?.status === 'Settled') {
         setConnectionState('disconnected')
         return
@@ -159,10 +163,7 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
         setConnectionState('reconnecting')
         reconnectAttemptRef.current += 1
         const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 30000)
-
-        setTimeout(() => {
-          connectWebSocket()
-        }, delay)
+        setTimeout(() => connectWebSocket(), delay)
       } else {
         setConnectionState('error')
         setError('Connection lost. Please refresh the page.')
@@ -171,13 +172,9 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
   }, [matchId, matchState?.status])
 
   useEffect(() => {
-    // Fetch initial state
     fetchInitialState()
-
-    // Connect WebSocket
     connectWebSocket()
 
-    // Cleanup
     return () => {
       if (wsRef.current) {
         wsRef.current.close()
@@ -186,213 +183,443 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
     }
   }, [matchId, fetchInitialState, connectWebSocket])
 
-  // Connection status indicator
-  const ConnectionStatus = () => {
-    switch (connectionState) {
-      case 'connected':
-        return (
-          <div className="flex items-center gap-1 text-green-400 text-sm">
-            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-            Live
-          </div>
-        )
-      case 'reconnecting':
-        return (
-          <div className="flex items-center gap-1 text-yellow-400 text-sm">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            Reconnecting...
-          </div>
-        )
-      case 'error':
-      case 'disconnected':
-        return (
-          <div className="flex items-center gap-1 text-red-400 text-sm">
-            <WifiOff className="w-3 h-3" />
-            Disconnected
-          </div>
-        )
-      default:
-        return (
-          <div className="flex items-center gap-1 text-gray-400 text-sm">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            Connecting...
-          </div>
-        )
-    }
-  }
-
   if (!matchState) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 gap-4">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
-        {error && (
-          <p className="text-red-400 text-sm">{error}</p>
-        )}
+      <div className="flex flex-col items-center justify-center h-96 gap-4">
+        <div className="relative">
+          <div className="w-16 h-16 rounded-full border-2 border-cyan/30 animate-spin" style={{ borderTopColor: '#00F5FF' }} />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Zap className="w-6 h-6 text-cyan" />
+          </div>
+        </div>
+        <p className="text-text-secondary font-body">Loading match data...</p>
+        {error && <p className="text-danger text-sm">{error}</p>}
       </div>
     )
   }
 
   const minutes = Math.floor(matchState.timeRemainingSecs / 60)
   const seconds = matchState.timeRemainingSecs % 60
+  const timeProgress = ((900 - matchState.timeRemainingSecs) / 900) * 100
+
+  const agent1Leading = matchState.agent1State.pnl > matchState.agent2State.pnl
+  const pnlDiff = Math.abs(matchState.agent1State.pnl - matchState.agent2State.pnl)
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-      {/* Main Chart */}
-      <div className="lg:col-span-2 bg-arena-card rounded-xl border border-arena-border p-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <h3 className="font-bold">P&L Over Time</h3>
-            <ConnectionStatus />
+    <div className="space-y-6">
+      {/* Match Header */}
+      <div className="glass-panel p-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          {/* Timer */}
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <svg className="w-20 h-20 -rotate-90">
+                <circle
+                  cx="40"
+                  cy="40"
+                  r="36"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  className="text-elevated"
+                />
+                <circle
+                  cx="40"
+                  cy="40"
+                  r="36"
+                  fill="none"
+                  stroke="url(#timerGradient)"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeDasharray={`${226 * (1 - timeProgress / 100)} 226`}
+                />
+                <defs>
+                  <linearGradient id="timerGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#00F5FF" />
+                    <stop offset="100%" stopColor="#FF006E" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="font-mono text-2xl font-bold text-white">
+                  {minutes}:{seconds.toString().padStart(2, '0')}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <ConnectionStatus state={connectionState} />
+              </div>
+              <p className="text-text-tertiary text-sm font-body">Time Remaining</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-lg">
-            <Clock className="w-5 h-5 text-gray-400" aria-hidden="true" />
-            <span className="font-mono" aria-label={`${minutes} minutes and ${seconds} seconds remaining`}>
-              {minutes}:{seconds.toString().padStart(2, '0')}
+
+          {/* Score */}
+          <div className="flex items-center gap-8">
+            <AgentScore
+              agent={matchState.agent1State}
+              side="cyan"
+              isLeading={agent1Leading}
+            />
+
+            <div className="text-center">
+              <div className="vs-divider w-16 h-16">
+                <span className="text-sm">VS</span>
+              </div>
+              <div className="mt-2 font-mono text-xs text-text-tertiary">
+                ${(pnlDiff / 100).toFixed(2)} diff
+              </div>
+            </div>
+
+            <AgentScore
+              agent={matchState.agent2State}
+              side="magenta"
+              isLeading={!agent1Leading && matchState.agent2State.pnl !== matchState.agent1State.pnl}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Main Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* P&L Chart */}
+        <div className="lg:col-span-7 glass-panel p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-display text-lg font-bold text-white">P&L Performance</h3>
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-cyan" />
+                <span className="text-text-secondary">Agent #{matchState.agent1State.agentId}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-magenta" />
+                <span className="text-text-secondary">Agent #{matchState.agent2State.agentId}</span>
+              </div>
+            </div>
+          </div>
+
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={pnlHistory}>
+              <defs>
+                <linearGradient id="cyanGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#00F5FF" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#00F5FF" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="magentaGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#FF006E" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#FF006E" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#252538" vertical={false} />
+              <XAxis
+                dataKey="time"
+                stroke="#606078"
+                tick={{ fill: '#606078', fontSize: 11 }}
+                tickLine={false}
+                axisLine={{ stroke: '#252538' }}
+              />
+              <YAxis
+                stroke="#606078"
+                tick={{ fill: '#606078', fontSize: 11 }}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v) => `$${v}`}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: '#141420',
+                  border: '1px solid #252538',
+                  borderRadius: '8px',
+                  fontFamily: 'JetBrains Mono',
+                  fontSize: '12px',
+                }}
+                labelStyle={{ color: '#A0A0B8' }}
+              />
+              <ReferenceLine y={0} stroke="#606078" strokeDasharray="3 3" />
+              <Line
+                type="monotone"
+                dataKey="agent1"
+                stroke="#00F5FF"
+                strokeWidth={2}
+                dot={false}
+                name={`Agent #${matchState.agent1State.agentId}`}
+              />
+              <Line
+                type="monotone"
+                dataKey="agent2"
+                stroke="#FF006E"
+                strokeWidth={2}
+                dot={false}
+                name={`Agent #${matchState.agent2State.agentId}`}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Trade Activity */}
+        <div className="lg:col-span-5 glass-panel p-5 flex flex-col max-h-[420px]">
+          <div className="flex items-center gap-2 mb-4">
+            <Activity className="w-5 h-5 text-cyan" />
+            <h3 className="font-display text-lg font-bold text-white">Trade Activity</h3>
+            <span className="ml-auto text-text-tertiary text-sm font-mono">
+              {tradeActivity.length} trades
             </span>
           </div>
-        </div>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={pnlHistory}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" />
-            <XAxis dataKey="time" stroke="#666" />
-            <YAxis stroke="#666" />
-            <Tooltip
-              contentStyle={{
-                background: '#12121a',
-                border: '1px solid #1e1e2e',
-                borderRadius: '8px',
-              }}
-            />
-            <Line
-              type="monotone"
-              dataKey="agent1"
-              stroke="#3b82f6"
-              strokeWidth={2}
-              dot={false}
-              name="Agent #1"
-            />
-            <Line
-              type="monotone"
-              dataKey="agent2"
-              stroke="#ef4444"
-              strokeWidth={2}
-              dot={false}
-              name="Agent #2"
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
 
-      {/* Trade Activity Feed */}
-      <div className="lg:col-span-1 bg-arena-card rounded-xl border border-arena-border p-4 max-h-[400px] overflow-hidden flex flex-col">
-        <div className="flex items-center gap-2 mb-3">
-          <Activity className="w-4 h-4 text-indigo-400" />
-          <h4 className="font-bold">Trade Activity</h4>
-        </div>
-        <div className="overflow-y-auto flex-1 space-y-2">
-          {tradeActivity.length === 0 ? (
-            <div className="text-center text-gray-500 py-8">
-              <p>No trades yet</p>
-              <p className="text-sm">Waiting for agents to trade...</p>
-            </div>
-          ) : (
-            tradeActivity.map((trade, idx) => (
-              <TradeActivityItem
-                key={trade.tradeId || idx}
-                trade={trade}
-                agent1Id={matchState.agent1State.agentId}
-              />
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Sidebar */}
-      <div className="space-y-4">
-        {/* Agent 1 */}
-        <AgentPanel agent={matchState.agent1State} color="blue" />
-
-        {/* Agent 2 */}
-        <AgentPanel agent={matchState.agent2State} color="red" />
-
-        {/* Prices */}
-        <div className="bg-arena-card rounded-xl border border-arena-border p-4">
-          <h4 className="font-bold mb-3">Live Prices</h4>
-          <div className="space-y-2">
-            {Object.entries(matchState.prices).map(([symbol, price]) => (
-              <div key={symbol} className="flex justify-between">
-                <span className="text-gray-400">{symbol}</span>
-                <span className="font-mono">${price.toLocaleString()}</span>
+          <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+            {tradeActivity.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center py-8">
+                <Target className="w-10 h-10 text-text-tertiary mb-3" />
+                <p className="text-text-secondary font-body">Waiting for trades...</p>
+                <p className="text-text-tertiary text-sm mt-1">Agents are analyzing the market</p>
               </div>
-            ))}
+            ) : (
+              tradeActivity.map((trade, idx) => (
+                <TradeActivityItem
+                  key={trade.tradeId || idx}
+                  trade={trade}
+                  agent1Id={matchState.agent1State.agentId}
+                />
+              ))
+            )}
           </div>
+        </div>
+      </div>
+
+      {/* Agent Details */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <AgentPanel
+          agent={matchState.agent1State}
+          side="cyan"
+          prices={matchState.prices}
+          isLeading={agent1Leading}
+        />
+        <AgentPanel
+          agent={matchState.agent2State}
+          side="magenta"
+          prices={matchState.prices}
+          isLeading={!agent1Leading && matchState.agent2State.pnl !== matchState.agent1State.pnl}
+        />
+      </div>
+
+      {/* Live Prices */}
+      <div className="glass-panel p-5">
+        <h3 className="font-display text-lg font-bold text-white mb-4">Live Prices</h3>
+        <div className="grid grid-cols-3 gap-4">
+          {Object.entries(matchState.prices).map(([symbol, price]) => (
+            <PriceCard key={symbol} symbol={symbol} price={price} />
+          ))}
         </div>
       </div>
     </div>
   )
 }
 
-function AgentPanel({ agent, color }: { agent: AgentState; color: 'blue' | 'red' }) {
+function ConnectionStatus({ state }: { state: ConnectionState }) {
+  switch (state) {
+    case 'connected':
+      return <div className="live-indicator">Connected</div>
+    case 'reconnecting':
+      return (
+        <div className="flex items-center gap-2 text-warning text-sm">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span className="font-mono">Reconnecting...</span>
+        </div>
+      )
+    case 'error':
+    case 'disconnected':
+      return (
+        <div className="flex items-center gap-2 text-danger text-sm">
+          <WifiOff className="w-4 h-4" />
+          <span className="font-mono">Disconnected</span>
+        </div>
+      )
+    default:
+      return (
+        <div className="flex items-center gap-2 text-text-secondary text-sm">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span className="font-mono">Connecting...</span>
+        </div>
+      )
+  }
+}
+
+function AgentScore({
+  agent,
+  side,
+  isLeading,
+}: {
+  agent: AgentState
+  side: 'cyan' | 'magenta'
+  isLeading: boolean
+}) {
   const isPositive = agent.pnl >= 0
-  const bgColor = color === 'blue' ? 'from-blue-500/20' : 'from-red-500/20'
 
   return (
-    <div className="bg-arena-card rounded-xl border border-arena-border p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
+    <div className={`text-center ${side === 'magenta' ? 'order-last' : ''}`}>
+      <div
+        className={`
+          relative w-20 h-20 rounded-2xl flex items-center justify-center
+          font-display text-3xl font-bold
+          ${side === 'cyan'
+            ? 'bg-cyan/10 text-cyan border border-cyan/30'
+            : 'bg-magenta/10 text-magenta border border-magenta/30'
+          }
+          ${isLeading
+            ? side === 'cyan'
+              ? 'shadow-glow-cyan'
+              : 'shadow-glow-magenta'
+            : ''
+          }
+        `}
+      >
+        #{agent.agentId}
+        {isLeading && (
+          <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-gold flex items-center justify-center shadow-glow-gold">
+            <Zap className="w-4 h-4 text-void" />
+          </div>
+        )}
+      </div>
+      <div
+        className={`
+          mt-3 font-mono text-2xl font-bold
+          ${isPositive ? 'text-success' : 'text-danger'}
+        `}
+      >
+        {isPositive ? '+' : ''}${agent.pnl.toFixed(2)}
+      </div>
+      <div className="text-text-tertiary text-sm font-body mt-1">
+        {agent.tradesCount} trades
+      </div>
+    </div>
+  )
+}
+
+function AgentPanel({
+  agent,
+  side,
+  prices,
+  isLeading,
+}: {
+  agent: AgentState
+  side: 'cyan' | 'magenta'
+  prices: Record<string, number>
+  isLeading: boolean
+}) {
+  const isPositive = agent.pnl >= 0
+
+  return (
+    <div className={`glass-panel p-5 ${side === 'cyan' ? 'glow-border-cyan' : 'glow-border-magenta'}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-3">
           <div
-            className={`w-8 h-8 rounded-full bg-gradient-to-br ${
-              color === 'blue' ? 'from-blue-500 to-blue-600' : 'from-red-500 to-red-600'
-            } flex items-center justify-center text-sm font-bold`}
+            className={`
+              w-12 h-12 rounded-xl flex items-center justify-center
+              font-display text-xl font-bold
+              ${side === 'cyan'
+                ? 'bg-cyan/20 text-cyan'
+                : 'bg-magenta/20 text-magenta'
+              }
+            `}
           >
             #{agent.agentId}
           </div>
-          <span className="font-bold">Agent #{agent.agentId}</span>
+          <div>
+            <div className="font-display font-bold text-white">Agent #{agent.agentId}</div>
+            <div className="text-text-tertiary text-sm font-body">
+              {isLeading ? 'Leading' : 'Trailing'}
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-1 text-gray-400 text-sm">
+        <div className="flex items-center gap-2 text-text-secondary text-sm">
           <Zap className="w-4 h-4" />
           {agent.tradesCount} trades
         </div>
       </div>
 
-      {/* P&L */}
-      <div
-        className={`rounded-lg p-3 mb-3 bg-gradient-to-r ${bgColor} to-transparent`}
-      >
-        <div className="text-sm text-gray-400 mb-1">Total P&L</div>
-        <div
-          className={`text-2xl font-bold flex items-center gap-1 ${
-            isPositive ? 'text-green-400' : 'text-red-400'
-          }`}
-        >
-          {isPositive ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
-          {isPositive ? '+' : ''}${agent.pnl.toFixed(2)}
+      {/* Stats Grid */}
+      <div className="grid grid-cols-2 gap-4 mb-5">
+        <div className="bg-elevated rounded-lg p-3">
+          <div className="data-label mb-1">Total P&L</div>
+          <div
+            className={`font-mono text-xl font-bold flex items-center gap-1 ${
+              isPositive ? 'text-success' : 'text-danger'
+            }`}
+          >
+            {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+            {isPositive ? '+' : ''}${agent.pnl.toFixed(2)}
+          </div>
+        </div>
+        <div className="bg-elevated rounded-lg p-3">
+          <div className="data-label mb-1">Balance</div>
+          <div className="font-mono text-xl font-bold text-white">
+            ${agent.balance.toFixed(2)}
+          </div>
         </div>
       </div>
 
       {/* Positions */}
-      {agent.positions.length > 0 && (
-        <div>
-          <div className="text-sm text-gray-400 mb-2">Open Positions</div>
-          {agent.positions.map((pos, i) => (
-            <div key={i} className="flex justify-between text-sm py-1 border-t border-arena-border">
-              <span>
-                {pos.symbol} {pos.side} {pos.leverage}x
-              </span>
-              <span className={pos.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}>
-                {pos.unrealizedPnl >= 0 ? '+' : ''}${pos.unrealizedPnl.toFixed(2)}
-              </span>
-            </div>
-          ))}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Shield className="w-4 h-4 text-text-tertiary" />
+          <span className="data-label">Open Positions</span>
+          <span className="ml-auto text-text-tertiary text-sm">{agent.positions.length}</span>
         </div>
-      )}
+
+        {agent.positions.length === 0 ? (
+          <div className="text-center py-4 text-text-tertiary text-sm">
+            No open positions
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {agent.positions.map((pos, i) => (
+              <PositionRow key={i} position={pos} side={side} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PositionRow({ position, side }: { position: Position; side: 'cyan' | 'magenta' }) {
+  const isLong = position.side === 'Long'
+  const isPositive = position.unrealizedPnl >= 0
+
+  return (
+    <div className="flex items-center justify-between py-2 px-3 bg-elevated rounded-lg">
+      <div className="flex items-center gap-3">
+        <div
+          className={`
+            w-8 h-8 rounded flex items-center justify-center text-xs font-bold
+            ${isLong ? 'bg-success/20 text-success' : 'bg-danger/20 text-danger'}
+          `}
+        >
+          {isLong ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+        </div>
+        <div>
+          <div className="font-mono text-sm text-white">{position.symbol}</div>
+          <div className="text-text-tertiary text-xs">
+            {position.leverage}x {position.side}
+          </div>
+        </div>
+      </div>
+      <div className="text-right">
+        <div className={`font-mono text-sm ${isPositive ? 'text-success' : 'text-danger'}`}>
+          {isPositive ? '+' : ''}${position.unrealizedPnl.toFixed(2)}
+        </div>
+        <div className="text-text-tertiary text-xs font-mono">
+          ${position.size.toFixed(0)}
+        </div>
+      </div>
     </div>
   )
 }
 
 function TradeActivityItem({ trade, agent1Id }: { trade: TradeEvent; agent1Id: number }) {
   const isAgent1 = trade.agentId === agent1Id
-  const agentColor = isAgent1 ? 'text-blue-400' : 'text-red-400'
   const isLong = trade.side === 'Long'
   const isOpen = trade.action === 'Open'
   const isProfitable = trade.realizedPnl !== null && trade.realizedPnl > 0
@@ -403,43 +630,76 @@ function TradeActivityItem({ trade, agent1Id }: { trade: TradeEvent; agent1Id: n
   }
 
   return (
-    <div className="bg-arena-bg/50 rounded-lg p-2 text-sm border border-arena-border/50 animate-fadeIn">
-      <div className="flex items-center justify-between mb-1">
+    <div
+      className={`
+        relative p-3 rounded-lg border animate-slide-in-right
+        ${isAgent1
+          ? 'bg-cyan/5 border-cyan/20'
+          : 'bg-magenta/5 border-magenta/20'
+        }
+      `}
+    >
+      {/* Action indicator */}
+      <div
+        className={`
+          absolute left-0 top-0 bottom-0 w-1 rounded-l-lg
+          ${isAgent1 ? 'bg-cyan' : 'bg-magenta'}
+        `}
+      />
+
+      <div className="flex items-start justify-between mb-1">
         <div className="flex items-center gap-2">
-          <span className={`font-semibold ${agentColor}`}>
-            Agent #{trade.agentId}
+          <span className={`font-display text-sm font-bold ${isAgent1 ? 'text-cyan' : 'text-magenta'}`}>
+            #{trade.agentId}
           </span>
-          <span className="text-gray-500">{formatTime(trade.timestamp)}</span>
+          <span className="text-text-tertiary text-xs font-mono">{formatTime(trade.timestamp)}</span>
         </div>
-        <div className="flex items-center gap-1">
-          {isLong ? (
-            <ArrowUpRight className="w-3 h-3 text-green-400" />
-          ) : (
-            <ArrowDownRight className="w-3 h-3 text-red-400" />
-          )}
-          <span className={isLong ? 'text-green-400' : 'text-red-400'}>
-            {trade.side}
-          </span>
+        <div
+          className={`
+            flex items-center gap-1 text-xs font-medium
+            ${isLong ? 'text-success' : 'text-danger'}
+          `}
+        >
+          {isLong ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+          {trade.side}
         </div>
       </div>
 
       <div className="flex items-center justify-between">
-        <div>
-          <span className="font-medium">{trade.action}</span>
-          <span className="text-gray-400 ml-2">
+        <div className="text-sm">
+          <span
+            className={`
+              px-1.5 py-0.5 rounded text-xs font-medium mr-2
+              ${isOpen ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'}
+            `}
+          >
+            {trade.action}
+          </span>
+          <span className="text-text-secondary font-mono">
             {trade.symbol} ${trade.size.toFixed(0)} @ {trade.leverage}x
           </span>
         </div>
         <div className="text-right">
-          <div className="text-gray-400 text-xs">
+          <div className="text-text-tertiary text-xs font-mono">
             ${trade.price.toLocaleString()}
           </div>
           {trade.realizedPnl !== null && (
-            <div className={`text-xs font-medium ${isProfitable ? 'text-green-400' : 'text-red-400'}`}>
+            <div className={`text-xs font-mono font-medium ${isProfitable ? 'text-success' : 'text-danger'}`}>
               {isProfitable ? '+' : ''}${trade.realizedPnl.toFixed(2)}
             </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function PriceCard({ symbol, price }: { symbol: string; price: number }) {
+  return (
+    <div className="bg-elevated rounded-lg p-4 text-center">
+      <div className="text-text-tertiary text-sm font-body mb-1">{symbol}/USD</div>
+      <div className="font-mono text-xl font-bold text-white">
+        ${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </div>
     </div>
   )

@@ -1,7 +1,7 @@
 'use client'
 
-import { Component, ErrorInfo, ReactNode } from 'react'
-import { AlertCircle, RefreshCw } from 'lucide-react'
+import React, { Component, ErrorInfo, ReactNode } from 'react'
+import { AlertTriangle, RefreshCw, Home } from 'lucide-react'
 
 interface Props {
   children: ReactNode
@@ -21,7 +21,11 @@ interface State {
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props)
-    this.state = { hasError: false, error: null, errorInfo: null }
+    this.state = {
+      hasError: false,
+      error: null,
+      errorInfo: null,
+    }
   }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
@@ -29,16 +33,14 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // Log error to console in development
-    console.error('Error caught by boundary:', error, errorInfo)
-
+    console.error('ErrorBoundary caught an error:', error, errorInfo)
     this.setState({ errorInfo })
 
-    // In production, you would send this to an error tracking service
+    // In production, send to error reporting service
     // Example: Sentry.captureException(error, { extra: errorInfo })
   }
 
-  handleReset = () => {
+  handleRetry = () => {
     this.setState({ hasError: false, error: null, errorInfo: null })
   }
 
@@ -50,36 +52,50 @@ export class ErrorBoundary extends Component<Props, State> {
 
       return (
         <div className="min-h-[400px] flex items-center justify-center p-8">
-          <div className="max-w-md w-full bg-arena-card rounded-xl border border-arena-border p-6 text-center">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center">
-              <AlertCircle className="w-8 h-8 text-red-400" />
+          <div className="glass-panel max-w-md w-full p-8 text-center">
+            {/* Error Icon */}
+            <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-danger/20 flex items-center justify-center">
+              <AlertTriangle className="w-8 h-8 text-danger" />
             </div>
-            <h2 className="text-xl font-bold mb-2">Something went wrong</h2>
-            <p className="text-gray-400 mb-4">
-              An error occurred while rendering this component.
+
+            {/* Title */}
+            <h2 className="font-display text-xl font-bold text-white mb-2">
+              Something went wrong
+            </h2>
+
+            {/* Description */}
+            <p className="text-text-secondary font-body mb-6">
+              {this.state.error?.message || 'An unexpected error occurred'}
             </p>
+
+            {/* Error details (dev mode) */}
             {process.env.NODE_ENV === 'development' && this.state.error && (
-              <details className="text-left mb-4 p-3 bg-arena-bg rounded-lg text-sm">
-                <summary className="cursor-pointer text-gray-400 hover:text-white">
-                  Error details
-                </summary>
-                <pre className="mt-2 text-red-400 whitespace-pre-wrap break-words">
-                  {this.state.error.message}
-                </pre>
+              <div className="mb-6 p-4 bg-void rounded-lg text-left">
+                <div className="text-danger text-xs font-mono mb-2">
+                  {this.state.error.name}: {this.state.error.message}
+                </div>
                 {this.state.errorInfo && (
-                  <pre className="mt-2 text-gray-500 whitespace-pre-wrap break-words text-xs">
+                  <pre className="text-text-tertiary text-xs font-mono overflow-auto max-h-32">
                     {this.state.errorInfo.componentStack}
                   </pre>
                 )}
-              </details>
+              </div>
             )}
-            <button
-              onClick={this.handleReset}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg transition"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Try again
-            </button>
+
+            {/* Actions */}
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={this.handleRetry}
+                className="btn-primary"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Try Again
+              </button>
+              <a href="/" className="btn-secondary">
+                <Home className="w-4 h-4" />
+                Go Home
+              </a>
+            </div>
           </div>
         </div>
       )
@@ -90,7 +106,7 @@ export class ErrorBoundary extends Component<Props, State> {
 }
 
 /**
- * Hook-based error boundary wrapper for functional components
+ * HOC wrapper for functional components
  */
 export function withErrorBoundary<P extends object>(
   WrappedComponent: React.ComponentType<P>,
@@ -103,4 +119,26 @@ export function withErrorBoundary<P extends object>(
       </ErrorBoundary>
     )
   }
+}
+
+/**
+ * Hook for functional components to trigger error boundary
+ */
+export function useErrorHandler() {
+  const [error, setError] = React.useState<Error | null>(null)
+
+  const handleError = React.useCallback((err: Error) => {
+    console.error('Error handled:', err)
+    setError(err)
+  }, [])
+
+  const clearError = React.useCallback(() => {
+    setError(null)
+  }, [])
+
+  if (error) {
+    throw error // This will be caught by the nearest ErrorBoundary
+  }
+
+  return { handleError, clearError }
 }

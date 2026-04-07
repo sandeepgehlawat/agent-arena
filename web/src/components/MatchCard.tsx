@@ -1,6 +1,7 @@
 'use client'
 
-import { Clock, DollarSign, Swords } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Clock, DollarSign, Zap, TrendingUp, TrendingDown } from 'lucide-react'
 
 interface Match {
   matchId: string
@@ -11,16 +12,11 @@ interface Match {
   entryFee: number
   prizePool: number
   startedAt?: number
+  agent1Pnl?: number
+  agent2Pnl?: number
 }
 
 const TIER_NAMES = ['Rookie', 'Bronze', 'Silver', 'Gold', 'Diamond']
-const TIER_COLORS = [
-  'from-gray-400 to-gray-500',
-  'from-amber-600 to-amber-700',
-  'from-gray-300 to-gray-400',
-  'from-yellow-400 to-yellow-500',
-  'from-cyan-400 to-blue-500',
-]
 
 export function MatchCard({
   match,
@@ -29,64 +25,178 @@ export function MatchCard({
   match: Match
   onClick?: () => void
 }) {
-  const timeRemaining = match.startedAt
-    ? Math.max(0, 900 - (Date.now() / 1000 - match.startedAt))
-    : 900
+  const [timeRemaining, setTimeRemaining] = useState(900)
+
+  useEffect(() => {
+    if (!match.startedAt) return
+
+    const updateTime = () => {
+      const remaining = Math.max(0, 900 - (Date.now() / 1000 - match.startedAt!))
+      setTimeRemaining(Math.floor(remaining))
+    }
+
+    updateTime()
+    const interval = setInterval(updateTime, 1000)
+    return () => clearInterval(interval)
+  }, [match.startedAt])
 
   const minutes = Math.floor(timeRemaining / 60)
-  const seconds = Math.floor(timeRemaining % 60)
+  const seconds = timeRemaining % 60
+  const timeProgress = ((900 - timeRemaining) / 900) * 100
+
+  const tierClass = `tier-${TIER_NAMES[match.tier].toLowerCase()}`
+
+  // Determine who's winning
+  const agent1Leading = (match.agent1Pnl || 0) > (match.agent2Pnl || 0)
+  const agent2Leading = (match.agent2Pnl || 0) > (match.agent1Pnl || 0)
 
   return (
     <div
       onClick={onClick}
-      className="bg-arena-card rounded-xl border border-arena-border p-4 cursor-pointer hover:border-indigo-500/50 transition group"
+      className="glass-panel p-5 cursor-pointer card-hover group relative overflow-hidden"
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === 'Enter' && onClick?.()}
+      aria-label={`Match: Agent ${match.agent1Id} vs Agent ${match.agent2Id}`}
     >
+      {/* Background glow effect */}
+      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+        <div className="absolute top-0 left-0 w-1/2 h-full bg-gradient-to-r from-cyan/5 to-transparent" />
+        <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-magenta/5 to-transparent" />
+      </div>
+
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="relative flex items-center justify-between mb-5">
         <div className="flex items-center gap-2">
-          <span
-            className={`px-2 py-1 rounded text-xs font-medium bg-gradient-to-r ${TIER_COLORS[match.tier]} text-white`}
-          >
+          <span className={`tier-badge ${tierClass}`}>
             {TIER_NAMES[match.tier]}
           </span>
-          <span className="flex items-center gap-1 text-green-400 text-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
-            LIVE
-          </span>
+          <div className="live-indicator text-xs">
+            Live
+          </div>
         </div>
-        <div className="flex items-center gap-1 text-gray-400 text-sm">
+
+        <div className="flex items-center gap-2 text-text-secondary">
           <Clock className="w-4 h-4" />
-          {minutes}:{seconds.toString().padStart(2, '0')}
+          <span className="font-mono text-sm font-medium text-white">
+            {minutes}:{seconds.toString().padStart(2, '0')}
+          </span>
         </div>
       </div>
 
-      {/* Agents */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-center flex-1">
-          <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-lg font-bold">
-            #{match.agent1Id}
-          </div>
-          <div className="text-sm text-gray-400">Agent</div>
+      {/* Time Progress Bar */}
+      <div className="relative mb-6">
+        <div className="progress-bar">
+          <div
+            className="progress-bar-fill bg-gradient-to-r from-cyan via-magenta to-cyan"
+            style={{ width: `${timeProgress}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Agents Battle View */}
+      <div className="relative flex items-center justify-between mb-6">
+        {/* Agent 1 (Cyan) */}
+        <AgentBattleCard
+          agentId={match.agent1Id}
+          pnl={match.agent1Pnl || 0}
+          side="cyan"
+          isLeading={agent1Leading}
+        />
+
+        {/* VS Divider */}
+        <div className="vs-divider flex-shrink-0 mx-2">
+          <span>VS</span>
         </div>
 
-        <div className="px-4">
-          <Swords className="w-6 h-6 text-indigo-400" />
-        </div>
-
-        <div className="text-center flex-1">
-          <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center text-lg font-bold">
-            #{match.agent2Id}
-          </div>
-          <div className="text-sm text-gray-400">Agent</div>
-        </div>
+        {/* Agent 2 (Magenta) */}
+        <AgentBattleCard
+          agentId={match.agent2Id}
+          pnl={match.agent2Pnl || 0}
+          side="magenta"
+          isLeading={agent2Leading}
+        />
       </div>
 
       {/* Prize Pool */}
-      <div className="flex items-center justify-center gap-2 py-2 rounded-lg bg-arena-bg/50 group-hover:bg-indigo-500/10 transition">
-        <DollarSign className="w-4 h-4 text-green-400" />
-        <span className="text-green-400 font-medium">
-          ${(match.prizePool / 1000000).toFixed(2)} Prize
-        </span>
+      <div className="relative flex items-center justify-center gap-3 py-3 rounded-lg bg-elevated border border-arena-border group-hover:border-gold/30 transition-colors">
+        <DollarSign className="w-5 h-5 text-gold" />
+        <div className="flex items-baseline gap-2">
+          <span className="font-display text-xl font-bold text-gold">
+            ${(match.prizePool / 1000000).toFixed(2)}
+          </span>
+          <span className="text-text-tertiary text-sm font-body">Prize Pool</span>
+        </div>
+      </div>
+
+      {/* Corner accents */}
+      <div className="absolute top-0 left-0 w-8 h-8 border-l-2 border-t-2 border-cyan/30 rounded-tl-xl" />
+      <div className="absolute top-0 right-0 w-8 h-8 border-r-2 border-t-2 border-magenta/30 rounded-tr-xl" />
+      <div className="absolute bottom-0 left-0 w-8 h-8 border-l-2 border-b-2 border-cyan/30 rounded-bl-xl" />
+      <div className="absolute bottom-0 right-0 w-8 h-8 border-r-2 border-b-2 border-magenta/30 rounded-br-xl" />
+    </div>
+  )
+}
+
+function AgentBattleCard({
+  agentId,
+  pnl,
+  side,
+  isLeading,
+}: {
+  agentId: number
+  pnl: number
+  side: 'cyan' | 'magenta'
+  isLeading: boolean
+}) {
+  const isPositive = pnl >= 0
+  const color = side === 'cyan' ? 'cyan' : 'magenta'
+
+  return (
+    <div className={`flex-1 text-center ${side === 'magenta' ? 'order-last' : ''}`}>
+      {/* Agent Avatar */}
+      <div className="relative inline-block mb-3">
+        <div
+          className={`
+            w-16 h-16 rounded-2xl flex items-center justify-center
+            font-display text-2xl font-bold
+            bg-gradient-to-br transition-all duration-300
+            ${side === 'cyan'
+              ? 'from-cyan/20 to-cyan/5 text-cyan border border-cyan/30'
+              : 'from-magenta/20 to-magenta/5 text-magenta border border-magenta/30'
+            }
+            ${isLeading ? 'scale-110 shadow-lg' : ''}
+            ${isLeading && side === 'cyan' ? 'shadow-glow-cyan' : ''}
+            ${isLeading && side === 'magenta' ? 'shadow-glow-magenta' : ''}
+          `}
+        >
+          #{agentId}
+        </div>
+        {isLeading && (
+          <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-gold flex items-center justify-center">
+            <Zap className="w-2.5 h-2.5 text-void" />
+          </div>
+        )}
+      </div>
+
+      {/* Agent Label */}
+      <div className="text-text-tertiary text-xs font-body mb-2 uppercase tracking-wider">
+        Agent
+      </div>
+
+      {/* P&L */}
+      <div
+        className={`
+          flex items-center justify-center gap-1 font-mono text-sm font-medium
+          ${isPositive ? 'text-success' : 'text-danger'}
+        `}
+      >
+        {isPositive ? (
+          <TrendingUp className="w-3 h-3" />
+        ) : (
+          <TrendingDown className="w-3 h-3" />
+        )}
+        {isPositive ? '+' : ''}${Math.abs(pnl / 100).toFixed(2)}
       </div>
     </div>
   )

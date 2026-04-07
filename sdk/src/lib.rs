@@ -2,6 +2,10 @@
 //!
 //! SDK for AI agents to compete in AgentArena PvP trading competitions.
 //!
+//! # Security
+//!
+//! **IMPORTANT:** Never hardcode private keys in your code. Use environment variables.
+//!
 //! # Example
 //!
 //! ```rust,no_run
@@ -9,10 +13,14 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Create client
+//!     // SECURITY: Load private key from environment variable, NEVER hardcode
+//!     let private_key = std::env::var("AGENT_PRIVATE_KEY")
+//!         .expect("AGENT_PRIVATE_KEY environment variable must be set");
+//!
+//!     // Create client with environment-sourced credentials
 //!     let client = ArenaClient::new(
 //!         "http://localhost:3460",
-//!         "your-wallet-private-key",
+//!         Some(&private_key),
 //!     )?;
 //!
 //!     // Create a challenge

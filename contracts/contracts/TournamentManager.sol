@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.25;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -346,6 +346,7 @@ contract TournamentManager is Ownable, ReentrancyGuard {
 
     /**
      * @notice Distribute prizes to winners
+     * @dev Uses remainder approach to handle rounding: last place gets any leftover from integer division
      */
     function _distributePrizes(
         bytes32 tournamentId,
@@ -356,10 +357,16 @@ contract TournamentManager is Ownable, ReentrancyGuard {
     ) internal {
         Tournament storage t = tournaments[tournamentId];
 
+        // Calculate prizes with potential rounding
         uint256 platformFee = (t.prizePool * PLATFORM_FEE_BPS) / 10000;
         uint256 prize1st = (t.prizePool * PRIZE_1ST_BPS) / 10000;
         uint256 prize2nd = (t.prizePool * PRIZE_2ND_BPS) / 10000;
         uint256 prize3rd = (t.prizePool * PRIZE_3RD_BPS) / 10000;
+
+        // Track total distributed to handle rounding
+        uint256 totalDistributed = platformFee + prize1st + prize2nd;
+        uint256 third1Prize = 0;
+        uint256 third2Prize = 0;
 
         // Platform fee
         usdc.safeTransfer(owner(), platformFee);
@@ -372,14 +379,24 @@ contract TournamentManager is Ownable, ReentrancyGuard {
         address secondWallet = arenaRegistry.identityRegistry().getWalletByAgent(second);
         usdc.safeTransfer(secondWallet, prize2nd);
 
-        // Third places
+        // Third places - give second 3rd place any rounding remainder
         if (third1 > 0) {
+            third1Prize = prize3rd;
+            totalDistributed += third1Prize;
             address third1Wallet = arenaRegistry.identityRegistry().getWalletByAgent(third1);
-            usdc.safeTransfer(third1Wallet, prize3rd);
+            usdc.safeTransfer(third1Wallet, third1Prize);
         }
         if (third2 > 0) {
+            // Give last place the remainder to handle rounding
+            third2Prize = t.prizePool - totalDistributed;
             address third2Wallet = arenaRegistry.identityRegistry().getWalletByAgent(third2);
-            usdc.safeTransfer(third2Wallet, prize3rd);
+            usdc.safeTransfer(third2Wallet, third2Prize);
+        } else if (third1 == 0) {
+            // If no 3rd places, remainder goes to platform
+            uint256 remainder = t.prizePool - totalDistributed;
+            if (remainder > 0) {
+                usdc.safeTransfer(owner(), remainder);
+            }
         }
 
         emit PrizesDistributed(tournamentId, winner, prize1st);
@@ -406,12 +423,34 @@ contract TournamentManager is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Simple shuffle using block data
+     * @notice Shuffle participants for bracket seeding
+     * @dev WARNING: This uses block.prevrandao which can be influenced by validators.
+     *      For high-stakes tournaments, consider using Chainlink VRF:
+     *      1. Request randomness before startTournament
+     *      2. Use the random word as seed in _shuffleParticipants
+     *      See: https://docs.chain.link/vrf
+     *
+     * Current implementation adds more entropy sources but is NOT fully secure:
+     * - block.prevrandao: Can be influenced by validators (post-merge)
+     * - block.timestamp: Can be manipulated within ~15 second window
+     * - msg.sender: Adds some unpredictability from starter's address
+     * - tournamentId: Unique per tournament
      */
     function _shuffleParticipants(uint256[] storage arr) internal {
         uint256 n = arr.length;
+        // Combine multiple entropy sources (still not cryptographically secure)
+        bytes32 seed = keccak256(abi.encodePacked(
+            block.timestamp,
+            block.prevrandao,
+            msg.sender,
+            block.number,
+            arr.length
+        ));
+
         for (uint256 i = n - 1; i > 0; i--) {
-            uint256 j = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, i))) % (i + 1);
+            // Use evolving hash for each swap to reduce predictability
+            seed = keccak256(abi.encodePacked(seed, i));
+            uint256 j = uint256(seed) % (i + 1);
             (arr[i], arr[j]) = (arr[j], arr[i]);
         }
     }

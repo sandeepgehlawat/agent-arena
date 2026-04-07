@@ -9,6 +9,9 @@ const USDC_ABI = [
 
 /**
  * x402 Payment handler for automatic payment processing
+ *
+ * SECURITY: This class handles sensitive wallet credentials.
+ * Custom toJSON and inspect methods prevent private key exposure in logs.
  */
 export class X402Handler {
   private wallet: ethers.Wallet;
@@ -23,6 +26,29 @@ export class X402Handler {
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
     this.wallet = new ethers.Wallet(privateKey, this.provider);
     this.usdcAddress = usdcAddress;
+  }
+
+  // SECURITY: Prevent private key from being logged via JSON.stringify
+  toJSON() {
+    return {
+      address: this.wallet.address,
+      usdcAddress: this.usdcAddress,
+      privateKey: '[REDACTED]',
+    };
+  }
+
+  // SECURITY: Prevent private key from being logged via console.log/util.inspect (Node.js)
+  [Symbol.for('nodejs.util.inspect.custom')]() {
+    return {
+      address: this.wallet.address,
+      usdcAddress: this.usdcAddress,
+      privateKey: '[REDACTED]',
+    };
+  }
+
+  // SECURITY: Prevent private key from appearing in string representation
+  toString() {
+    return `X402Handler { address: ${this.wallet.address}, usdcAddress: ${this.usdcAddress} }`;
   }
 
   /**
