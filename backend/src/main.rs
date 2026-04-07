@@ -134,6 +134,8 @@ async fn main() {
         .route("/api/defi/chains", get(routes::defi::get_supported_chains))
         .route("/api/defi/tokens", get(routes::defi::get_supported_tokens))
         // Public match info (no auth required)
+        .route("/api/matches", get(routes::matches::list_matches))
+        .route("/api/matches/stats", get(routes::matches::get_stats))
         .route("/api/matches/:match_id", get(routes::matches::get_match))
         .route("/api/matches/:match_id/state", get(routes::matches::get_match_state))
         .route("/api/matches/:match_id/trades", get(routes::matches::get_trade_history))

@@ -13,6 +13,7 @@ import {
   ChevronDown,
   Search,
   RefreshCw,
+  AlertCircle,
 } from 'lucide-react'
 
 interface Match {
@@ -35,183 +36,7 @@ type TabType = 'live' | 'upcoming' | 'completed'
 type TierFilter = 'all' | 0 | 1 | 2 | 3 | 4
 
 const TIER_NAMES = ['Rookie', 'Bronze', 'Silver', 'Gold', 'Diamond']
-
-// Mock data for development
-const MOCK_MATCHES: Match[] = [
-  // Live matches
-  {
-    matchId: 'match-001-live',
-    agent1Id: 7,
-    agent2Id: 3,
-    tier: 4,
-    status: 'Active',
-    entryFee: 500000,
-    prizePool: 950000,
-    startedAt: Math.floor(Date.now() / 1000) - 300,
-    agent1Pnl: 1250,
-    agent2Pnl: -820,
-  },
-  {
-    matchId: 'match-002-live',
-    agent1Id: 12,
-    agent2Id: 1,
-    tier: 3,
-    status: 'Active',
-    entryFee: 250000,
-    prizePool: 475000,
-    startedAt: Math.floor(Date.now() / 1000) - 450,
-    agent1Pnl: 340,
-    agent2Pnl: 520,
-  },
-  {
-    matchId: 'match-003-live',
-    agent1Id: 9,
-    agent2Id: 15,
-    tier: 2,
-    status: 'Active',
-    entryFee: 100000,
-    prizePool: 190000,
-    startedAt: Math.floor(Date.now() / 1000) - 120,
-    agent1Pnl: -150,
-    agent2Pnl: -280,
-  },
-  {
-    matchId: 'match-004-live',
-    agent1Id: 21,
-    agent2Id: 8,
-    tier: 1,
-    status: 'Active',
-    entryFee: 50000,
-    prizePool: 95000,
-    startedAt: Math.floor(Date.now() / 1000) - 600,
-    agent1Pnl: 890,
-    agent2Pnl: -450,
-  },
-  {
-    matchId: 'match-005-live',
-    agent1Id: 4,
-    agent2Id: 18,
-    tier: 0,
-    status: 'Active',
-    entryFee: 10000,
-    prizePool: 19000,
-    startedAt: Math.floor(Date.now() / 1000) - 200,
-    agent1Pnl: 120,
-    agent2Pnl: 80,
-  },
-  // Upcoming matches
-  {
-    matchId: 'match-006-upcoming',
-    agent1Id: 7,
-    agent2Id: 12,
-    tier: 4,
-    status: 'Scheduled',
-    entryFee: 500000,
-    prizePool: 950000,
-    scheduledAt: Math.floor(Date.now() / 1000) + 1800,
-  },
-  {
-    matchId: 'match-007-upcoming',
-    agent1Id: 3,
-    agent2Id: 9,
-    tier: 3,
-    status: 'Scheduled',
-    entryFee: 250000,
-    prizePool: 475000,
-    scheduledAt: Math.floor(Date.now() / 1000) + 3600,
-  },
-  {
-    matchId: 'match-008-upcoming',
-    agent1Id: 1,
-    agent2Id: 15,
-    tier: 2,
-    status: 'Scheduled',
-    entryFee: 100000,
-    prizePool: 190000,
-    scheduledAt: Math.floor(Date.now() / 1000) + 7200,
-  },
-  {
-    matchId: 'match-009-upcoming',
-    agent1Id: 4,
-    agent2Id: 21,
-    tier: 1,
-    status: 'Matchmaking',
-    entryFee: 50000,
-    prizePool: 95000,
-    scheduledAt: Math.floor(Date.now() / 1000) + 600,
-  },
-  // Completed matches
-  {
-    matchId: 'match-010-completed',
-    agent1Id: 7,
-    agent2Id: 1,
-    tier: 4,
-    status: 'Completed',
-    entryFee: 500000,
-    prizePool: 950000,
-    startedAt: Math.floor(Date.now() / 1000) - 3600,
-    endedAt: Math.floor(Date.now() / 1000) - 2700,
-    agent1Pnl: 2450,
-    agent2Pnl: -1890,
-    winnerId: 7,
-  },
-  {
-    matchId: 'match-011-completed',
-    agent1Id: 3,
-    agent2Id: 12,
-    tier: 3,
-    status: 'Settled',
-    entryFee: 250000,
-    prizePool: 475000,
-    startedAt: Math.floor(Date.now() / 1000) - 7200,
-    endedAt: Math.floor(Date.now() / 1000) - 6300,
-    agent1Pnl: -1200,
-    agent2Pnl: 1850,
-    winnerId: 12,
-  },
-  {
-    matchId: 'match-012-completed',
-    agent1Id: 9,
-    agent2Id: 4,
-    tier: 2,
-    status: 'Completed',
-    entryFee: 100000,
-    prizePool: 190000,
-    startedAt: Math.floor(Date.now() / 1000) - 10800,
-    endedAt: Math.floor(Date.now() / 1000) - 9900,
-    agent1Pnl: 780,
-    agent2Pnl: -920,
-    winnerId: 9,
-  },
-  {
-    matchId: 'match-013-completed',
-    agent1Id: 15,
-    agent2Id: 8,
-    tier: 1,
-    status: 'Settled',
-    entryFee: 50000,
-    prizePool: 95000,
-    startedAt: Math.floor(Date.now() / 1000) - 14400,
-    endedAt: Math.floor(Date.now() / 1000) - 13500,
-    agent1Pnl: -560,
-    agent2Pnl: 420,
-    winnerId: 8,
-  },
-  {
-    matchId: 'match-014-completed',
-    agent1Id: 21,
-    agent2Id: 18,
-    tier: 0,
-    status: 'Completed',
-    entryFee: 10000,
-    prizePool: 19000,
-    startedAt: Math.floor(Date.now() / 1000) - 18000,
-    endedAt: Math.floor(Date.now() / 1000) - 17100,
-    agent1Pnl: 150,
-    agent2Pnl: -200,
-    winnerId: 21,
-  },
-]
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3460'
 
 export default function MatchesPage() {
   const router = useRouter()
@@ -220,27 +45,42 @@ export default function MatchesPage() {
   const [tierFilter, setTierFilter] = useState<TierFilter>('all')
   const [showTierDropdown, setShowTierDropdown] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
 
-  useEffect(() => {
-    // Simulate API fetch with mock data
-    const fetchMatches = async () => {
-      setIsLoading(true)
-      // TODO: Replace with actual API call
-      // const response = await fetch(`${API_URL}/api/matches`)
-      // const data = await response.json()
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      setMatches(MOCK_MATCHES)
+  const fetchMatches = async () => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`${API_URL}/api/matches`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch matches: ${response.status}`)
+      }
+      const data = await response.json()
+      // Handle both { matches: [...] } and direct array response
+      const matchList = data.matches || data || []
+      setMatches(matchList)
+    } catch (err) {
+      console.error('Error fetching matches:', err)
+      setError(err instanceof Error ? err.message : 'Failed to fetch matches')
+    } finally {
       setIsLoading(false)
     }
+  }
 
+  useEffect(() => {
     fetchMatches()
+
+    // Refresh matches every 30 seconds
+    const interval = setInterval(fetchMatches, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   const filteredMatches = useMemo(() => {
     return matches.filter((match) => {
       // Filter by tab (status)
-      const isLive = match.status === 'Active'
+      const isLive = match.status === 'Active' || match.status === 'InProgress'
       const isUpcoming = match.status === 'Scheduled' || match.status === 'Matchmaking'
       const isCompleted = match.status === 'Completed' || match.status === 'Settled'
 
@@ -268,7 +108,7 @@ export default function MatchesPage() {
   const matchCounts = useMemo(() => {
     const counts = { live: 0, upcoming: 0, completed: 0 }
     matches.forEach((match) => {
-      if (match.status === 'Active') counts.live++
+      if (match.status === 'Active' || match.status === 'InProgress') counts.live++
       else if (match.status === 'Scheduled' || match.status === 'Matchmaking') counts.upcoming++
       else if (match.status === 'Completed' || match.status === 'Settled') counts.completed++
     })
@@ -280,11 +120,7 @@ export default function MatchesPage() {
   }
 
   const handleRefresh = () => {
-    setIsLoading(true)
-    setTimeout(() => {
-      setMatches(MOCK_MATCHES)
-      setIsLoading(false)
-    }, 500)
+    fetchMatches()
   }
 
   return (
@@ -417,8 +253,28 @@ export default function MatchesPage() {
         </div>
       </div>
 
+      {/* Error State */}
+      {error && (
+        <div className="flex flex-col items-center justify-center py-20 gap-4">
+          <div className="w-20 h-20 rounded-2xl bg-danger/10 flex items-center justify-center">
+            <AlertCircle className="w-10 h-10 text-danger" />
+          </div>
+          <div className="text-center">
+            <h3 className="font-display text-lg font-bold text-white mb-2">
+              Failed to load matches
+            </h3>
+            <p className="text-text-secondary font-body max-w-md mb-4">
+              {error}
+            </p>
+            <button onClick={handleRefresh} className="btn-secondary">
+              Try Again
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Loading State */}
-      {isLoading && (
+      {isLoading && !error && (
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <div className="relative">
             <div className="w-16 h-16 rounded-full border-2 border-border">
@@ -437,7 +293,7 @@ export default function MatchesPage() {
       )}
 
       {/* Empty State */}
-      {!isLoading && filteredMatches.length === 0 && (
+      {!isLoading && !error && filteredMatches.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <div className="w-20 h-20 rounded-2xl bg-elevated flex items-center justify-center">
             {activeTab === 'live' ? (
@@ -472,7 +328,7 @@ export default function MatchesPage() {
       )}
 
       {/* Match Grid */}
-      {!isLoading && filteredMatches.length > 0 && (
+      {!isLoading && !error && filteredMatches.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 stagger-children">
           {filteredMatches.map((match) => (
             <Link
@@ -496,7 +352,7 @@ export default function MatchesPage() {
       )}
 
       {/* Results Summary */}
-      {!isLoading && filteredMatches.length > 0 && (
+      {!isLoading && !error && filteredMatches.length > 0 && (
         <div className="mt-8 text-center text-text-tertiary text-sm font-body">
           Showing {filteredMatches.length} of {matchCounts[activeTab]} {activeTab} matches
           {tierFilter !== 'all' && ` in ${TIER_NAMES[tierFilter]} tier`}

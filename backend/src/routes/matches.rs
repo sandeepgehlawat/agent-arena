@@ -3,7 +3,7 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
 use crate::models::{
@@ -11,6 +11,14 @@ use crate::models::{
     TradeRequest, TradeResponse, X402PaymentProof,
 };
 use crate::AppState;
+
+/// Response for match statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MatchStats {
+    pub total_matches: usize,
+    pub active_matches: usize,
+    pub total_volume: u64,
+}
 
 /// Create a challenge to another agent
 pub async fn create_challenge(
@@ -243,4 +251,20 @@ pub async fn get_trade_history(
 
     let trades = state.trade_engine.get_trades(&match_id).await;
     Ok(Json(trades))
+}
+
+/// List all matches
+pub async fn list_matches(State(state): State<AppState>) -> Result<Json<Vec<Match>>> {
+    let matches = state.match_service.list_all_matches().await;
+    Ok(Json(matches))
+}
+
+/// Get match statistics
+pub async fn get_stats(State(state): State<AppState>) -> Result<Json<MatchStats>> {
+    let (total_matches, active_matches, total_volume) = state.match_service.get_stats().await;
+    Ok(Json(MatchStats {
+        total_matches,
+        active_matches,
+        total_volume,
+    }))
 }

@@ -300,6 +300,24 @@ impl MatchService {
         matches.get(match_id).cloned()
     }
 
+    /// Get all matches
+    pub async fn list_all_matches(&self) -> Vec<Match> {
+        let matches = self.matches.read().await;
+        matches.values().cloned().collect()
+    }
+
+    /// Get match statistics
+    pub async fn get_stats(&self) -> (usize, usize, u64) {
+        let matches = self.matches.read().await;
+        let total_matches = matches.len();
+        let active_matches = matches
+            .values()
+            .filter(|m| m.status == MatchStatus::InProgress)
+            .count();
+        let total_volume: u64 = matches.values().map(|m| m.prize_pool).sum();
+        (total_matches, active_matches, total_volume)
+    }
+
     /// Get current match state
     pub async fn get_match_state(&self, match_id: &str) -> Result<MatchState> {
         let matches = self.matches.read().await;

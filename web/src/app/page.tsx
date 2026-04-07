@@ -30,28 +30,88 @@ interface RecentResult {
   timestamp: number
 }
 
+interface Stats {
+  totalMatches: number
+  activeAgents: number
+  totalVolume: number
+  activeTournaments: number
+}
+
 const TIER_NAMES = ['Rookie', 'Bronze', 'Silver', 'Gold', 'Diamond']
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3460'
 
 export default function Home() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([])
   const [recentResults, setRecentResults] = useState<RecentResult[]>([])
   const [selectedMatch, setSelectedMatch] = useState<string | null>(null)
-  const [stats, setStats] = useState({ totalMatches: 0, activeAgents: 0, totalVolume: 0, activeTournaments: 0 })
+  const [stats, setStats] = useState<Stats>({ totalMatches: 0, activeAgents: 0, totalVolume: 0, activeTournaments: 0 })
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setLiveMatches([
-      { matchId: 'demo-match-1', agent1Id: 7, agent2Id: 12, tier: 3, status: 'InProgress', entryFee: 500000000, prizePool: 975000000, startedAt: Date.now() / 1000 - 420 },
-      { matchId: 'demo-match-2', agent1Id: 3, agent2Id: 15, tier: 2, status: 'InProgress', entryFee: 100000000, prizePool: 195000000, startedAt: Date.now() / 1000 - 180 },
-      { matchId: 'demo-match-3', agent1Id: 21, agent2Id: 9, tier: 1, status: 'InProgress', entryFee: 25000000, prizePool: 48750000, startedAt: Date.now() / 1000 - 600 },
-    ])
-    setRecentResults([
-      { matchId: 'r1', agent1Id: 1, agent2Id: 5, tier: 2, winnerId: 1, winnerPnl: 12550, prize: 195000000, timestamp: Date.now() - 300000 },
-      { matchId: 'r2', agent1Id: 3, agent2Id: 8, tier: 3, winnerId: 8, winnerPnl: 8920, prize: 975000000, timestamp: Date.now() - 600000 },
-      { matchId: 'r3', agent1Id: 2, agent2Id: 4, tier: 1, winnerId: 2, winnerPnl: 6780, prize: 48750000, timestamp: Date.now() - 900000 },
-      { matchId: 'r4', agent1Id: 7, agent2Id: 11, tier: 4, winnerId: 7, winnerPnl: 45230, prize: 3900000000, timestamp: Date.now() - 1200000 },
-      { matchId: 'r5', agent1Id: 9, agent2Id: 14, tier: 2, winnerId: 14, winnerPnl: 11200, prize: 195000000, timestamp: Date.now() - 1500000 },
-    ])
-    setStats({ totalMatches: 12847, activeAgents: 247, totalVolume: 24500000, activeTournaments: 3 })
+    const fetchData = async () => {
+      setIsLoading(true)
+      setError(null)
+
+      try {
+        // Fetch stats and matches in parallel
+        const [statsRes, matchesRes] = await Promise.all([
+          fetch(`${API_URL}/api/stats`),
+          fetch(`${API_URL}/api/matches`),
+        ])
+
+        if (!statsRes.ok) {
+          throw new Error(`Failed to fetch stats: ${statsRes.status}`)
+        }
+        if (!matchesRes.ok) {
+          throw new Error(`Failed to fetch matches: ${matchesRes.status}`)
+        }
+
+        const statsData = await statsRes.json()
+        const matchesData = await matchesRes.json()
+
+        // Set stats
+        setStats({
+          totalMatches: statsData.totalMatches || 0,
+          activeAgents: statsData.activeAgents || 0,
+          totalVolume: statsData.totalVolume || 0,
+          activeTournaments: statsData.activeTournaments || 0,
+        })
+
+        // Filter live matches (InProgress or Active status)
+        const live = (matchesData.matches || matchesData || []).filter(
+          (m: Match) => m.status === 'InProgress' || m.status === 'Active'
+        )
+        setLiveMatches(live)
+
+        // Filter completed matches for recent results
+        const completed = (matchesData.matches || matchesData || [])
+          .filter((m: Match) => m.status === 'Completed' || m.status === 'Settled')
+          .slice(0, 5)
+          .map((m: Match) => ({
+            matchId: m.matchId,
+            agent1Id: m.agent1Id,
+            agent2Id: m.agent2Id,
+            tier: m.tier,
+            winnerId: m.winnerId || 0,
+            winnerPnl: m.winnerId === m.agent1Id ? (m.agent1Pnl || 0) : (m.agent2Pnl || 0),
+            prize: m.prizePool,
+            timestamp: (m.startedAt || 0) * 1000,
+          }))
+        setRecentResults(completed)
+      } catch (err) {
+        console.error('Error fetching data:', err)
+        setError(err instanceof Error ? err.message : 'Failed to fetch data')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchData()
+
+    // Refresh data every 30 seconds
+    const interval = setInterval(fetchData, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   if (selectedMatch) {
@@ -115,60 +175,97 @@ export default function Home() {
         <Stat label="TOURNAMENTS" value={`${stats.activeTournaments}`} sub="$50K PRIZES" highlight />
       </section>
 
-      {/* LIVE MATCHES */}
-      <section className="py-12">
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-          <div className="flex items-center gap-4">
-            <h2 className="font-display text-3xl sm:text-4xl uppercase">Live Matches</h2>
-            <span className="live-indicator">● {liveMatches.length} LIVE</span>
+      {/* ERROR STATE */}
+      {error && (
+        <section className="py-12">
+          <div className="brutal-card brutal-shadow p-8 text-center border-accent border-4">
+            <div className="font-display text-2xl uppercase text-accent mb-2">Connection Error</div>
+            <div className="font-mono text-sm mb-4">{error}</div>
+            <button
+              onClick={() => window.location.reload()}
+              className="btn-secondary"
+            >
+              RETRY
+            </button>
           </div>
-          <Link href="/matches" className="font-mono text-sm uppercase border-b-2 border-ink hover:bg-accent hover:text-paper px-1">
-            VIEW ALL →
-          </Link>
-        </div>
-        <hr className="brutal-rule brutal-rule-thick" />
+        </section>
+      )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 stagger-children">
-          {liveMatches.map((match) => (
-            <MatchCard key={match.matchId} match={match} onClick={() => setSelectedMatch(match.matchId)} />
-          ))}
-          {liveMatches.length === 0 && (
-            <div className="col-span-full brutal-card brutal-shadow p-12 text-center">
-              <div className="font-display text-2xl uppercase">No live matches</div>
-              <div className="font-mono text-sm mt-2">// CHECK BACK SOON</div>
+      {/* LOADING STATE */}
+      {isLoading && !error && (
+        <section className="py-12">
+          <div className="flex items-center justify-center gap-4">
+            <div className="w-6 h-6 border-2 border-ink border-t-transparent animate-spin" />
+            <span className="font-mono text-sm uppercase tracking-widest">Loading matches...</span>
+          </div>
+        </section>
+      )}
+
+      {/* LIVE MATCHES */}
+      {!isLoading && !error && (
+        <section className="py-12">
+          <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+            <div className="flex items-center gap-4">
+              <h2 className="font-display text-3xl sm:text-4xl uppercase">Live Matches</h2>
+              <span className="live-indicator">● {liveMatches.length} LIVE</span>
             </div>
-          )}
-        </div>
-      </section>
+            <Link href="/matches" className="font-mono text-sm uppercase border-b-2 border-ink hover:bg-accent hover:text-paper px-1">
+              VIEW ALL →
+            </Link>
+          </div>
+          <hr className="brutal-rule brutal-rule-thick" />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 stagger-children">
+            {liveMatches.map((match) => (
+              <MatchCard key={match.matchId} match={match} onClick={() => setSelectedMatch(match.matchId)} />
+            ))}
+            {liveMatches.length === 0 && (
+              <div className="col-span-full brutal-card brutal-shadow p-12 text-center">
+                <div className="font-display text-2xl uppercase">No live matches</div>
+                <div className="font-mono text-sm mt-2">// CHECK BACK SOON</div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* RECENT RESULTS */}
-      <section className="pb-16">
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-          <h2 className="font-display text-3xl sm:text-4xl uppercase">Recent Results</h2>
-          <Link href="/history" className="font-mono text-sm uppercase border-b-2 border-ink hover:bg-accent hover:text-paper px-1">
-            FULL HISTORY →
-          </Link>
-        </div>
-        <hr className="brutal-rule brutal-rule-thick" />
+      {!isLoading && !error && (
+        <section className="pb-16">
+          <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+            <h2 className="font-display text-3xl sm:text-4xl uppercase">Recent Results</h2>
+            <Link href="/history" className="font-mono text-sm uppercase border-b-2 border-ink hover:bg-accent hover:text-paper px-1">
+              FULL HISTORY →
+            </Link>
+          </div>
+          <hr className="brutal-rule brutal-rule-thick" />
 
-        <div className="brutal-shadow border-[3px] border-ink overflow-x-auto">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>MATCH</th>
-                <th>TIER</th>
-                <th>WINNER</th>
-                <th className="text-right">P&L</th>
-                <th className="text-right">PRIZE</th>
-                <th className="text-right hide-mobile">TIME</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentResults.map((result) => <ResultRow key={result.matchId} result={result} />)}
-            </tbody>
-          </table>
-        </div>
-      </section>
+          {recentResults.length > 0 ? (
+            <div className="brutal-shadow border-[3px] border-ink overflow-x-auto">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>MATCH</th>
+                    <th>TIER</th>
+                    <th>WINNER</th>
+                    <th className="text-right">P&L</th>
+                    <th className="text-right">PRIZE</th>
+                    <th className="text-right hide-mobile">TIME</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentResults.map((result) => <ResultRow key={result.matchId} result={result} />)}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="brutal-card brutal-shadow p-12 text-center">
+              <div className="font-display text-2xl uppercase">No recent results</div>
+              <div className="font-mono text-sm mt-2">// MATCHES WILL APPEAR HERE</div>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }
