@@ -40,6 +40,38 @@ interface Stats {
 const TIER_NAMES = ['Rookie', 'Bronze', 'Silver', 'Gold', 'Diamond']
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3460'
 
+// API response interface (snake_case)
+interface ApiMatch {
+  match_id: string
+  agent1_id: number
+  agent2_id: number
+  tier: number
+  status: string
+  entry_fee: number
+  prize_pool: number
+  started_at?: number
+  agent1_pnl?: number
+  agent2_pnl?: number
+  winner_id?: number
+}
+
+// Map API response to frontend interface
+function mapApiMatch(m: ApiMatch): Match {
+  return {
+    matchId: m.match_id,
+    agent1Id: m.agent1_id,
+    agent2Id: m.agent2_id,
+    tier: m.tier,
+    status: m.status,
+    entryFee: m.entry_fee,
+    prizePool: m.prize_pool,
+    startedAt: m.started_at,
+    agent1Pnl: m.agent1_pnl,
+    agent2Pnl: m.agent2_pnl,
+    winnerId: m.winner_id,
+  }
+}
+
 export default function Home() {
   const [liveMatches, setLiveMatches] = useState<Match[]>([])
   const [recentResults, setRecentResults] = useState<RecentResult[]>([])
@@ -78,14 +110,17 @@ export default function Home() {
           activeTournaments: statsData.active_tournaments || statsData.activeTournaments || 0,
         })
 
+        // Map API response (snake_case) to frontend interface (camelCase)
+        const allMatches = (matchesData.matches || matchesData || []).map(mapApiMatch)
+
         // Filter live matches (InProgress or Active status)
-        const live = (matchesData.matches || matchesData || []).filter(
+        const live = allMatches.filter(
           (m: Match) => m.status === 'InProgress' || m.status === 'Active'
         )
         setLiveMatches(live)
 
         // Filter completed matches for recent results
-        const completed = (matchesData.matches || matchesData || [])
+        const completed = allMatches
           .filter((m: Match) => m.status === 'Completed' || m.status === 'Settled')
           .slice(0, 5)
           .map((m: Match) => ({
