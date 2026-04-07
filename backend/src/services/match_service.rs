@@ -13,6 +13,9 @@ const MATCH_DURATION_SECS: u64 = 900;
 /// Challenge timeout in seconds (5 minutes)
 const CHALLENGE_TIMEOUT_SECS: u64 = 300;
 
+/// State broadcast interval in seconds
+const STATE_BROADCAST_INTERVAL_SECS: u64 = 2;
+
 /// Match lifecycle service
 pub struct MatchService {
     trade_engine: Arc<TradeEngine>,
@@ -26,10 +29,17 @@ pub enum MatchUpdate {
     StateUpdate(MatchState),
     TradeExecuted {
         agent_id: u64,
+        trade_id: String,
         symbol: String,
+        action: String,
         side: String,
         size: f64,
         price: f64,
+        leverage: f64,
+        realized_pnl: Option<f64>,
+        new_balance: f64,
+        new_pnl: f64,
+        timestamp: u64,
     },
     MatchStarted,
     MatchEnded {
@@ -159,10 +169,48 @@ impl MatchService {
 
         // Schedule match end
         let service = self.clone_for_task();
+        let match_id_for_end = match_id_clone.clone();
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(MATCH_DURATION_SECS)).await;
-            if let Err(e) = service.end_match(&match_id_clone).await {
-                tracing::error!("Error ending match {}: {:?}", match_id_clone, e);
+            if let Err(e) = service.end_match(&match_id_for_end).await {
+                tracing::error!("Error ending match {}: {:?}", match_id_for_end, e);
+            }
+        });
+
+        // Spawn periodic state broadcast task
+        let service_for_broadcast = self.clone_for_task();
+        let match_id_for_broadcast = match_id_clone.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(STATE_BROADCAST_INTERVAL_SECS));
+            loop {
+                interval.tick().await;
+
+                // Check if match is still in progress
+                let matches = service_for_broadcast.matches.read().await;
+                let is_in_progress = matches
+                    .get(&match_id_for_broadcast)
+                    .map(|m| m.status == MatchStatus::InProgress)
+                    .unwrap_or(false);
+                drop(matches);
+
+                if !is_in_progress {
+                    tracing::debug!("Stopping state broadcast for match {}", match_id_for_broadcast);
+                    break;
+                }
+
+                // Update positions with current prices and broadcast state
+                if let Err(e) = service_for_broadcast.trade_engine.update_positions(&match_id_for_broadcast).await {
+                    tracing::warn!("Failed to update positions: {:?}", e);
+                    continue;
+                }
+
+                // Get current state and broadcast
+                if let Ok(state) = service_for_broadcast.get_match_state_internal(&match_id_for_broadcast).await {
+                    let broadcasters = service_for_broadcast.broadcasters.read().await;
+                    if let Some(tx) = broadcasters.get(&match_id_for_broadcast) {
+                        let _ = tx.send(MatchUpdate::StateUpdate(state));
+                    }
+                }
             }
         });
 
@@ -369,6 +417,60 @@ struct MatchServiceHandle {
 }
 
 impl MatchServiceHandle {
+    async fn get_match_state_internal(&self, match_id: &str) -> Result<MatchState> {
+        let matches = self.matches.read().await;
+        let m = matches
+            .get(match_id)
+            .ok_or_else(|| AppError::NotFound("Match not found".to_string()))?;
+
+        let time_remaining = if m.status == MatchStatus::InProgress {
+            if let Some(started) = m.started_at {
+                let now = chrono::Utc::now().timestamp() as u64;
+                let end_time = started + MATCH_DURATION_SECS;
+                if now < end_time { end_time - now } else { 0 }
+            } else {
+                MATCH_DURATION_SECS
+            }
+        } else {
+            0
+        };
+
+        let match_id_str = m.match_id.clone();
+        let status = m.status;
+        let agent1_id = m.agent1_id;
+        let agent2_id = m.agent2_id;
+        drop(matches);
+
+        let agent1_state = self
+            .trade_engine
+            .get_agent_state(&match_id_str, agent1_id)
+            .await
+            .unwrap_or(AgentMatchState {
+                agent_id: agent1_id,
+                ..Default::default()
+            });
+
+        let agent2_state = self
+            .trade_engine
+            .get_agent_state(&match_id_str, agent2_id)
+            .await
+            .unwrap_or(AgentMatchState {
+                agent_id: agent2_id,
+                ..Default::default()
+            });
+
+        let prices = self.trade_engine.price_feed.get_all_prices().await;
+
+        Ok(MatchState {
+            match_id: match_id_str,
+            status,
+            time_remaining_secs: time_remaining,
+            agent1_state,
+            agent2_state,
+            prices,
+        })
+    }
+
     async fn end_match(&self, match_id: &str) -> Result<()> {
         let mut matches = self.matches.write().await;
         let m = matches.get_mut(match_id);

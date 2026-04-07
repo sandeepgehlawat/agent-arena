@@ -20,6 +20,7 @@ use crate::middleware as mw;
 
 use services::{
     match_service::MatchService,
+    onchainos_service::OnchainOsService,
     oracle_service::OracleService,
     price_feed::PriceFeed,
     trade_engine::TradeEngine,
@@ -33,6 +34,7 @@ pub struct AppState {
     pub price_feed: Arc<PriceFeed>,
     pub x402_service: Arc<X402Service>,
     pub oracle_service: Arc<OracleService>,
+    pub onchainos_service: Arc<OnchainOsService>,
 }
 
 #[tokio::main]
@@ -72,12 +74,18 @@ async fn main() {
         platform_wallet,
     ));
 
+    let onchainos_service = Arc::new(OnchainOsService::new(
+        std::env::var("OKX_API_KEY").ok(),
+        std::env::var("OKX_PROJECT_ID").ok(),
+    ));
+
     let state = AppState {
         match_service,
         trade_engine,
         price_feed: price_feed.clone(),
         x402_service,
         oracle_service,
+        onchainos_service,
     };
 
     // Start price feed
@@ -117,9 +125,18 @@ async fn main() {
         // Leaderboard (no auth required)
         .route("/api/leaderboard", get(routes::leaderboard::get_leaderboard))
         .route("/api/leaderboard/season", get(routes::leaderboard::get_season_leaderboard))
+        // DeFi skills / OnchainOS (no auth required - informational)
+        .route("/api/defi/quote", get(routes::defi::get_swap_quote))
+        .route("/api/defi/route", get(routes::defi::get_swap_route))
+        .route("/api/defi/pools", get(routes::defi::get_pools))
+        .route("/api/defi/insights/:symbol", get(routes::defi::get_defi_insights))
+        .route("/api/defi/skill", post(routes::defi::execute_uniswap_skill))
+        .route("/api/defi/chains", get(routes::defi::get_supported_chains))
+        .route("/api/defi/tokens", get(routes::defi::get_supported_tokens))
         // Public match info (no auth required)
         .route("/api/matches/:match_id", get(routes::matches::get_match))
         .route("/api/matches/:match_id/state", get(routes::matches::get_match_state))
+        .route("/api/matches/:match_id/trades", get(routes::matches::get_trade_history))
         // WebSocket for live match updates
         .route("/ws/matches/:match_id", get(routes::ws::match_websocket))
         // Protected routes (require signature)

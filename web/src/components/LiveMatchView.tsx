@@ -10,7 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-import { TrendingUp, TrendingDown, Clock, Zap, WifiOff, Loader2 } from 'lucide-react'
+import { TrendingUp, TrendingDown, Clock, Zap, WifiOff, Loader2, Activity, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 
 interface Position {
   symbol: string
@@ -39,6 +39,21 @@ interface MatchState {
   prices: Record<string, number>
 }
 
+interface TradeEvent {
+  agentId: number
+  tradeId: string
+  symbol: string
+  action: string
+  side: string
+  size: number
+  price: number
+  leverage: number
+  realizedPnl: number | null
+  newBalance: number
+  newPnl: number
+  timestamp: number
+}
+
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3460'
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3460'
 
@@ -50,6 +65,7 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
   const [pnlHistory, setPnlHistory] = useState<
     Array<{ time: number; agent1: number; agent2: number }>
   >([])
+  const [tradeActivity, setTradeActivity] = useState<TradeEvent[]>([])
   const [error, setError] = useState<string | null>(null)
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
 
@@ -102,8 +118,22 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
             return updated
           })
         } else if (data.type === 'trade') {
-          // Trade notification - could show a toast here
-          console.log('Trade executed:', data)
+          // Add to trade activity feed
+          const trade: TradeEvent = {
+            agentId: data.data.agent_id,
+            tradeId: data.data.trade_id,
+            symbol: data.data.symbol,
+            action: data.data.action,
+            side: data.data.side,
+            size: data.data.size,
+            price: data.data.price,
+            leverage: data.data.leverage || 1,
+            realizedPnl: data.data.realized_pnl,
+            newBalance: data.data.new_balance,
+            newPnl: data.data.new_pnl,
+            timestamp: data.data.timestamp || Date.now() / 1000,
+          }
+          setTradeActivity(prev => [trade, ...prev].slice(0, 50)) // Keep last 50 trades
         } else if (data.type === 'ended') {
           setConnectionState('disconnected')
         }
@@ -206,7 +236,7 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
   const seconds = matchState.timeRemainingSecs % 60
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
       {/* Main Chart */}
       <div className="lg:col-span-2 bg-arena-card rounded-xl border border-arena-border p-4">
         <div className="flex items-center justify-between mb-4">
@@ -251,6 +281,30 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
             />
           </LineChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Trade Activity Feed */}
+      <div className="lg:col-span-1 bg-arena-card rounded-xl border border-arena-border p-4 max-h-[400px] overflow-hidden flex flex-col">
+        <div className="flex items-center gap-2 mb-3">
+          <Activity className="w-4 h-4 text-indigo-400" />
+          <h4 className="font-bold">Trade Activity</h4>
+        </div>
+        <div className="overflow-y-auto flex-1 space-y-2">
+          {tradeActivity.length === 0 ? (
+            <div className="text-center text-gray-500 py-8">
+              <p>No trades yet</p>
+              <p className="text-sm">Waiting for agents to trade...</p>
+            </div>
+          ) : (
+            tradeActivity.map((trade, idx) => (
+              <TradeActivityItem
+                key={trade.tradeId || idx}
+                trade={trade}
+                agent1Id={matchState.agent1State.agentId}
+              />
+            ))
+          )}
+        </div>
       </div>
 
       {/* Sidebar */}
@@ -332,6 +386,61 @@ function AgentPanel({ agent, color }: { agent: AgentState; color: 'blue' | 'red'
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function TradeActivityItem({ trade, agent1Id }: { trade: TradeEvent; agent1Id: number }) {
+  const isAgent1 = trade.agentId === agent1Id
+  const agentColor = isAgent1 ? 'text-blue-400' : 'text-red-400'
+  const isLong = trade.side === 'Long'
+  const isOpen = trade.action === 'Open'
+  const isProfitable = trade.realizedPnl !== null && trade.realizedPnl > 0
+
+  const formatTime = (timestamp: number) => {
+    const date = new Date(timestamp * 1000)
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  return (
+    <div className="bg-arena-bg/50 rounded-lg p-2 text-sm border border-arena-border/50 animate-fadeIn">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <span className={`font-semibold ${agentColor}`}>
+            Agent #{trade.agentId}
+          </span>
+          <span className="text-gray-500">{formatTime(trade.timestamp)}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          {isLong ? (
+            <ArrowUpRight className="w-3 h-3 text-green-400" />
+          ) : (
+            <ArrowDownRight className="w-3 h-3 text-red-400" />
+          )}
+          <span className={isLong ? 'text-green-400' : 'text-red-400'}>
+            {trade.side}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="font-medium">{trade.action}</span>
+          <span className="text-gray-400 ml-2">
+            {trade.symbol} ${trade.size.toFixed(0)} @ {trade.leverage}x
+          </span>
+        </div>
+        <div className="text-right">
+          <div className="text-gray-400 text-xs">
+            ${trade.price.toLocaleString()}
+          </div>
+          {trade.realizedPnl !== null && (
+            <div className={`text-xs font-medium ${isProfitable ? 'text-green-400' : 'text-red-400'}`}>
+              {isProfitable ? '+' : ''}${trade.realizedPnl.toFixed(2)}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

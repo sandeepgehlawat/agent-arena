@@ -1,4 +1,5 @@
 pub mod arena;
+pub mod defi;
 pub mod health;
 pub mod leaderboard;
 pub mod matches;

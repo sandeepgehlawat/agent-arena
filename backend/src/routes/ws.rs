@@ -58,19 +58,33 @@ async fn handle_socket(socket: WebSocket, state: AppState, match_id: String) {
                 }
                 MatchUpdate::TradeExecuted {
                     agent_id,
+                    trade_id,
                     symbol,
+                    action,
                     side,
                     size,
                     price,
+                    leverage,
+                    realized_pnl,
+                    new_balance,
+                    new_pnl,
+                    timestamp,
                 } => {
                     json!({
                         "type": "trade",
                         "data": {
                             "agent_id": agent_id,
+                            "trade_id": trade_id,
                             "symbol": symbol,
+                            "action": action,
                             "side": side,
                             "size": size,
-                            "price": price
+                            "price": price,
+                            "leverage": leverage,
+                            "realized_pnl": realized_pnl,
+                            "new_balance": new_balance,
+                            "new_pnl": new_pnl,
+                            "timestamp": timestamp
                         }
                     })
                 }

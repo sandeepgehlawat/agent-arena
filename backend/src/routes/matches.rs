@@ -157,6 +157,10 @@ pub async fn submit_trade(
         return Err(AppError::BadRequest("Agent not in this match".to_string()));
     }
 
+    // Extract values before move
+    let agent_id = request.agent_id;
+    let leverage = request.leverage.unwrap_or(1.0);
+
     // Execute trade
     let response = state
         .trade_engine
@@ -166,16 +170,31 @@ pub async fn submit_trade(
     // Broadcast trade update
     if response.success {
         use crate::services::match_service::MatchUpdate;
+
+        // Get agent's new total P&L
+        let agent_state = state
+            .trade_engine
+            .get_agent_state(&match_id, agent_id)
+            .await;
+        let new_pnl = agent_state.map(|s| s.pnl).unwrap_or(0.0);
+
         state
             .match_service
             .broadcast_update(
                 &match_id,
                 MatchUpdate::TradeExecuted {
-                    agent_id: response.trade_id.parse().unwrap_or(0),
+                    agent_id,
+                    trade_id: response.trade_id.clone(),
                     symbol: response.symbol.clone(),
+                    action: format!("{:?}", response.action),
                     side: format!("{:?}", response.side),
                     size: response.size_usd,
                     price: response.price,
+                    leverage,
+                    realized_pnl: response.realized_pnl,
+                    new_balance: response.new_balance,
+                    new_pnl,
+                    timestamp: chrono::Utc::now().timestamp() as u64,
                 },
             )
             .await;
@@ -208,4 +227,20 @@ pub async fn get_match(
         .ok_or_else(|| AppError::NotFound("Match not found".to_string()))?;
 
     Ok(Json(m))
+}
+
+/// Get trade history for a match
+pub async fn get_trade_history(
+    State(state): State<AppState>,
+    Path(match_id): Path<String>,
+) -> Result<Json<Vec<crate::models::TradeRecord>>> {
+    // Verify match exists
+    let _ = state
+        .match_service
+        .get_match(&match_id)
+        .await
+        .ok_or_else(|| AppError::NotFound("Match not found".to_string()))?;
+
+    let trades = state.trade_engine.get_trades(&match_id).await;
+    Ok(Json(trades))
 }
