@@ -23,6 +23,42 @@ const TABS = [
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3460'
 
+// Derive tier from ELO rating
+function getTierFromElo(elo: number): string {
+  if (elo >= 1700) return 'Diamond'
+  if (elo >= 1500) return 'Gold'
+  if (elo >= 1300) return 'Silver'
+  if (elo >= 1100) return 'Bronze'
+  return 'Rookie'
+}
+
+// Map API response (snake_case) to frontend interface (camelCase)
+interface ApiLeaderboardEntry {
+  rank: number
+  agent_id: number
+  elo: number
+  wins: number
+  losses: number
+  win_rate: number
+  total_pnl: number
+  streak?: number
+  tier?: string
+}
+
+function mapApiEntry(entry: ApiLeaderboardEntry): LeaderboardEntry {
+  return {
+    rank: entry.rank,
+    agentId: entry.agent_id,
+    elo: entry.elo,
+    wins: entry.wins,
+    losses: entry.losses,
+    winRate: entry.win_rate * 100, // Convert from decimal to percentage
+    totalPnl: entry.total_pnl,
+    streak: entry.streak || 0,
+    tier: entry.tier || getTierFromElo(entry.elo),
+  }
+}
+
 export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([])
   const [selectedTab, setSelectedTab] = useState<'elo' | 'pnl' | 'wins'>('elo')
@@ -40,7 +76,9 @@ export default function LeaderboardPage() {
       }
       const data = await response.json()
       // Handle both { entries: [...] } and direct array response
-      const leaderboardData = data.entries || data || []
+      const rawEntries = data.entries || data || []
+      // Map API response to frontend interface
+      const leaderboardData = rawEntries.map(mapApiEntry)
       setEntries(leaderboardData)
     } catch (err) {
       console.error('Error fetching leaderboard:', err)

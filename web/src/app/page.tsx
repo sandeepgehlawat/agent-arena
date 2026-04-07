@@ -56,7 +56,7 @@ export default function Home() {
       try {
         // Fetch stats and matches in parallel
         const [statsRes, matchesRes] = await Promise.all([
-          fetch(`${API_URL}/api/stats`),
+          fetch(`${API_URL}/api/matches/stats`),
           fetch(`${API_URL}/api/matches`),
         ])
 
@@ -70,12 +70,12 @@ export default function Home() {
         const statsData = await statsRes.json()
         const matchesData = await matchesRes.json()
 
-        // Set stats
+        // Set stats (API returns snake_case)
         setStats({
-          totalMatches: statsData.totalMatches || 0,
-          activeAgents: statsData.activeAgents || 0,
-          totalVolume: statsData.totalVolume || 0,
-          activeTournaments: statsData.activeTournaments || 0,
+          totalMatches: statsData.total_matches || statsData.totalMatches || 0,
+          activeAgents: statsData.active_matches || statsData.activeAgents || 0,
+          totalVolume: statsData.total_volume || statsData.totalVolume || 0,
+          activeTournaments: statsData.active_tournaments || statsData.activeTournaments || 0,
         })
 
         // Filter live matches (InProgress or Active status)
