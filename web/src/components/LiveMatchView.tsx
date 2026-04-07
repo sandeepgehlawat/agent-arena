@@ -53,6 +53,46 @@ interface MatchState {
   prices: Record<string, number>
 }
 
+// Map API response (snake_case) to frontend interface (camelCase)
+function mapApiMatchState(data: any): MatchState | null {
+  if (!data) return null
+
+  const mapPosition = (p: any): Position => ({
+    symbol: p.symbol,
+    side: p.side,
+    size: p.size,
+    entryPrice: p.entry_price ?? p.entryPrice ?? 0,
+    currentPrice: p.current_price ?? p.currentPrice ?? 0,
+    unrealizedPnl: p.unrealized_pnl ?? p.unrealizedPnl ?? 0,
+    leverage: p.leverage ?? 1,
+  })
+
+  const mapAgentState = (agent: any): AgentState | null => {
+    if (!agent) return null
+    return {
+      agentId: agent.agent_id ?? agent.agentId ?? 0,
+      balance: agent.balance ?? 0,
+      positions: (agent.positions || []).map(mapPosition),
+      pnl: agent.pnl ?? 0,
+      tradesCount: agent.trades_count ?? agent.tradesCount ?? 0,
+    }
+  }
+
+  const agent1State = mapAgentState(data.agent1_state ?? data.agent1State)
+  const agent2State = mapAgentState(data.agent2_state ?? data.agent2State)
+
+  if (!agent1State || !agent2State) return null
+
+  return {
+    matchId: data.match_id ?? data.matchId ?? '',
+    status: data.status ?? '',
+    timeRemainingSecs: data.time_remaining_secs ?? data.timeRemainingSecs ?? 0,
+    agent1State,
+    agent2State,
+    prices: data.prices ?? {},
+  }
+}
+
 interface TradeEvent {
   agentId: number
   tradeId: string
@@ -89,8 +129,13 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
       const response = await fetch(`${API_URL}/api/matches/${matchId}/state`)
       if (!response.ok) throw new Error('Failed to fetch match state')
       const data = await response.json()
-      setMatchState(data)
-      setError(null)
+      const mapped = mapApiMatchState(data)
+      if (mapped) {
+        setMatchState(mapped)
+        setError(null)
+      } else {
+        setError('Invalid match state data')
+      }
     } catch (err) {
       console.error('Failed to fetch initial state:', err)
       setError('Failed to load match data')
@@ -114,14 +159,15 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
       try {
         const data = JSON.parse(event.data)
         if (data.type === 'state') {
-          setMatchState(data.data)
-          // Only update PnL history if agent states exist
-          if (data.data?.agent1State && data.data?.agent2State) {
+          const mapped = mapApiMatchState(data.data)
+          if (mapped) {
+            setMatchState(mapped)
+            // Update PnL history
             setPnlHistory((prev) => {
               const newPoint = {
                 time: prev.length,
-                agent1: data.data.agent1State.pnl ?? 0,
-                agent2: data.data.agent2State.pnl ?? 0,
+                agent1: mapped.agent1State.pnl ?? 0,
+                agent2: mapped.agent2State.pnl ?? 0,
               }
               return [...prev, newPoint].slice(-120) // 2 minutes of data
             })
