@@ -46,7 +46,14 @@ contract MatchEscrow is ReentrancyGuard, Ownable {
         uint256 createdAt;
         uint256 startedAt;
         uint256 endedAt;
+        uint256 disputedAt;       // Track when dispute was raised
     }
+
+    // Dispute timeout: 7 days for resolution
+    uint256 public constant DISPUTE_TIMEOUT = 7 days;
+
+    // Maximum match duration before emergency withdrawal allowed (30 days)
+    uint256 public constant MAX_MATCH_DURATION = 30 days;
 
     // matchId => Match
     mapping(bytes32 => Match) public matches;
@@ -63,6 +70,8 @@ contract MatchEscrow is ReentrancyGuard, Ownable {
     event MatchRefunded(bytes32 indexed matchId, uint256 agent1Refund, uint256 agent2Refund);
     event MatchDisputed(bytes32 indexed matchId);
     event DisputeResolved(bytes32 indexed matchId, uint256 winnerId);
+    event DisputeTimedOut(bytes32 indexed matchId);
+    event EmergencyWithdrawal(bytes32 indexed matchId, address recipient, uint256 amount);
     event PlatformFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
 
     // Errors
@@ -75,6 +84,8 @@ contract MatchEscrow is ReentrancyGuard, Ownable {
     error NotFunded();
     error Unauthorized();
     error FeeTooHigh();
+    error DisputeNotTimedOut();
+    error MatchNotStale();
 
     modifier onlyManager() {
         if (!authorizedManagers[msg.sender]) revert Unauthorized();
@@ -120,7 +131,8 @@ contract MatchEscrow is ReentrancyGuard, Ownable {
             status: MatchStatus.Created,
             createdAt: block.timestamp,
             startedAt: 0,
-            endedAt: 0
+            endedAt: 0,
+            disputedAt: 0
         });
 
         emit MatchCreated(matchId, agent1Id, agent2Id, entryFee);
@@ -272,6 +284,7 @@ contract MatchEscrow is ReentrancyGuard, Ownable {
         if (msg.sender != m.agent1Wallet && msg.sender != m.agent2Wallet) revert Unauthorized();
 
         m.status = MatchStatus.Disputed;
+        m.disputedAt = block.timestamp;
         emit MatchDisputed(matchId);
     }
 
@@ -297,6 +310,73 @@ contract MatchEscrow is ReentrancyGuard, Ownable {
         usdc.safeTransfer(winner, netPrize);
 
         emit DisputeResolved(matchId, winnerId);
+    }
+
+    /**
+     * @notice Resolve a timed-out dispute (split funds evenly after timeout)
+     * @param matchId The match ID
+     */
+    function resolveTimedOutDispute(bytes32 matchId) external nonReentrant {
+        Match storage m = matches[matchId];
+        if (m.status != MatchStatus.Disputed) revert InvalidStatus();
+        if (block.timestamp < m.disputedAt + DISPUTE_TIMEOUT) revert DisputeNotTimedOut();
+
+        uint256 platformFee = (m.prizePool * platformFeeBps) / 10000;
+        uint256 netPrize = m.prizePool - platformFee;
+
+        m.status = MatchStatus.Settled;
+
+        if (platformFee > 0) {
+            usdc.safeTransfer(feeRecipient, platformFee);
+        }
+
+        // Split evenly on timeout
+        uint256 half = netPrize / 2;
+        usdc.safeTransfer(m.agent1Wallet, half);
+        usdc.safeTransfer(m.agent2Wallet, netPrize - half);
+
+        emit DisputeTimedOut(matchId);
+    }
+
+    /**
+     * @notice Emergency withdrawal for stale matches (stuck for 30+ days)
+     * @param matchId The match ID
+     */
+    function emergencyWithdraw(bytes32 matchId) external nonReentrant {
+        Match storage m = matches[matchId];
+
+        // Only for stuck matches (not settled or cancelled)
+        if (m.status == MatchStatus.Settled || m.status == MatchStatus.Cancelled) {
+            revert InvalidStatus();
+        }
+
+        // Only participants can initiate
+        if (msg.sender != m.agent1Wallet && msg.sender != m.agent2Wallet) {
+            revert Unauthorized();
+        }
+
+        // Must be stale (30+ days old)
+        if (block.timestamp < m.createdAt + MAX_MATCH_DURATION) {
+            revert MatchNotStale();
+        }
+
+        uint256 agent1Refund = 0;
+        uint256 agent2Refund = 0;
+
+        if (m.agent1Funded) {
+            agent1Refund = m.entryFee;
+            usdc.safeTransfer(m.agent1Wallet, agent1Refund);
+            emit EmergencyWithdrawal(matchId, m.agent1Wallet, agent1Refund);
+        }
+
+        if (m.agent2Funded) {
+            agent2Refund = m.entryFee;
+            usdc.safeTransfer(m.agent2Wallet, agent2Refund);
+            emit EmergencyWithdrawal(matchId, m.agent2Wallet, agent2Refund);
+        }
+
+        m.status = MatchStatus.Cancelled;
+        m.prizePool = 0;
     }
 
     // View functions

@@ -1,12 +1,17 @@
 use axum::{
+    middleware,
     routing::{get, post},
     Router,
 };
 use std::{net::SocketAddr, sync::Arc};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    trace::TraceLayer,
+};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod error;
+mod middleware as mw;
 mod models;
 mod routes;
 mod services;
@@ -81,28 +86,52 @@ async fn main() {
         }
     });
 
-    // Build router
+    // Configure CORS properly for production
+    let allowed_origins = std::env::var("ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| "http://localhost:3461".to_string());
+
+    let cors = if allowed_origins == "*" {
+        CorsLayer::permissive()
+    } else {
+        let origins: Vec<_> = allowed_origins
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+
+        CorsLayer::new()
+            .allow_origin(origins)
+            .allow_methods(Any)
+            .allow_headers(Any)
+    };
+
+    // Build router with middleware
     let app = Router::new()
-        // Health check
+        // Health checks (no auth required)
         .route("/health", get(routes::health::health_check))
-        // Arena registration
-        .route("/api/arena/register", post(routes::arena::register_for_arena))
-        .route("/api/arena/stats/:agent_id", get(routes::arena::get_stats))
-        // Matches
-        .route("/api/matches/challenge", post(routes::matches::create_challenge))
-        .route("/api/matches/:match_id/accept", post(routes::matches::accept_challenge))
-        .route("/api/matches/:match_id/trade", post(routes::matches::submit_trade))
-        .route("/api/matches/:match_id/state", get(routes::matches::get_match_state))
-        .route("/api/matches/:match_id", get(routes::matches::get_match))
-        // Leaderboard
+        .route("/health/ready", get(routes::health::readiness_check))
+        .route("/health/live", get(routes::health::liveness_check))
+        // Prices (no auth required)
+        .route("/api/prices", get(routes::prices::get_prices))
+        // Leaderboard (no auth required)
         .route("/api/leaderboard", get(routes::leaderboard::get_leaderboard))
         .route("/api/leaderboard/season", get(routes::leaderboard::get_season_leaderboard))
-        // Prices
-        .route("/api/prices", get(routes::prices::get_prices))
+        // Public match info (no auth required)
+        .route("/api/matches/:match_id", get(routes::matches::get_match))
+        .route("/api/matches/:match_id/state", get(routes::matches::get_match_state))
         // WebSocket for live match updates
         .route("/ws/matches/:match_id", get(routes::ws::match_websocket))
+        // Protected routes (require signature)
+        .nest("/api", Router::new()
+            .route("/arena/register", post(routes::arena::register_for_arena))
+            .route("/arena/stats/:agent_id", get(routes::arena::get_stats))
+            .route("/matches/challenge", post(routes::matches::create_challenge))
+            .route("/matches/:match_id/accept", post(routes::matches::accept_challenge))
+            .route("/matches/:match_id/trade", post(routes::matches::submit_trade))
+            .layer(middleware::from_fn(mw::verify_signature))
+        )
         .with_state(state)
-        .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn(mw::rate_limit))
+        .layer(cors)
         .layer(TraceLayer::new_for_http());
 
     // Start server
@@ -116,5 +145,38 @@ async fn main() {
     tracing::info!("AgentArena backend listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+
+    // Graceful shutdown handling
+    let shutdown_signal = async {
+        let ctrl_c = async {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("Failed to install Ctrl+C handler");
+        };
+
+        #[cfg(unix)]
+        let terminate = async {
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("Failed to install signal handler")
+                .recv()
+                .await;
+        };
+
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = terminate => {},
+        }
+
+        tracing::info!("Shutdown signal received, starting graceful shutdown...");
+    };
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal)
+        .await
+        .unwrap();
+
+    tracing::info!("Server shut down gracefully");
 }

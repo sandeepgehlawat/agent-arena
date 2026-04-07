@@ -40,6 +40,7 @@ contract MatchManager is Ownable {
         int256 agent2Pnl;
         bytes32 resultHash;
         bool resultSubmitted;
+        bool settled;  // Prevent double settlement
     }
 
     // matchId => MatchState
@@ -69,6 +70,7 @@ contract MatchManager is Ownable {
     error NotTrustedOracle();
     error InvalidResultHash();
     error MatchNotEnded();
+    error AlreadySettled();
 
     constructor(
         address _arenaRegistry,
@@ -144,7 +146,8 @@ contract MatchManager is Ownable {
             agent1Pnl: 0,
             agent2Pnl: 0,
             resultHash: bytes32(0),
-            resultSubmitted: false
+            resultSubmitted: false,
+            settled: false
         });
 
         // Mark agents as in match (pending)
@@ -236,6 +239,7 @@ contract MatchManager is Ownable {
     function settleMatch(bytes32 matchId) external {
         MatchState storage state = matchStates[matchId];
         if (!state.resultSubmitted) revert MatchNotReady();
+        if (state.settled) revert AlreadySettled();
 
         // Determine winner based on P&L
         uint256 winnerId;
@@ -265,6 +269,9 @@ contract MatchManager is Ownable {
 
         arenaRegistry.recordMatchResult(state.challenger, state.agent1Pnl, agent1Won);
         arenaRegistry.recordMatchResult(state.challenged, state.agent2Pnl, agent2Won);
+
+        // Mark as settled BEFORE external call (CEI pattern)
+        state.settled = true;
 
         // Distribute prizes
         matchEscrow.distributeWinnings(matchId, winnerId);

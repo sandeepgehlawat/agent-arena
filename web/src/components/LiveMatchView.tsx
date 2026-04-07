@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   LineChart,
   Line,
@@ -10,7 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-import { TrendingUp, TrendingDown, Clock, Zap } from 'lucide-react'
+import { TrendingUp, TrendingDown, Clock, Zap, WifiOff, Loader2 } from 'lucide-react'
 
 interface Position {
   symbol: string
@@ -40,6 +40,10 @@ interface MatchState {
 }
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3460'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3460'
+
+// WebSocket connection states
+type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
 
 export function LiveMatchView({ matchId }: { matchId: string }) {
   const [matchState, setMatchState] = useState<MatchState | null>(null)
@@ -47,80 +51,153 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
     Array<{ time: number; agent1: number; agent2: number }>
   >([])
   const [error, setError] = useState<string | null>(null)
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
+
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectAttemptRef = useRef(0)
+  const maxReconnectAttempts = 5
+
+  // Fetch initial state via REST
+  const fetchInitialState = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/matches/${matchId}/state`)
+      if (!response.ok) throw new Error('Failed to fetch match state')
+      const data = await response.json()
+      setMatchState(data)
+      setError(null)
+    } catch (err) {
+      console.error('Failed to fetch initial state:', err)
+      setError('Failed to load match data')
+    }
+  }, [matchId])
+
+  // Connect to WebSocket with reconnection logic
+  const connectWebSocket = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return
+
+    setConnectionState('connecting')
+    const ws = new WebSocket(`${WS_URL}/ws/matches/${matchId}`)
+    wsRef.current = ws
+
+    ws.onopen = () => {
+      setConnectionState('connected')
+      setError(null)
+      reconnectAttemptRef.current = 0
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'state') {
+          setMatchState(data.data)
+          // Update P&L history
+          setPnlHistory(prev => {
+            const newPoint = {
+              time: prev.length,
+              agent1: data.data.agent1State.pnl,
+              agent2: data.data.agent2State.pnl,
+            }
+            // Keep last 60 data points (1 minute at 1 update/sec)
+            const updated = [...prev, newPoint].slice(-60)
+            return updated
+          })
+        } else if (data.type === 'trade') {
+          // Trade notification - could show a toast here
+          console.log('Trade executed:', data)
+        } else if (data.type === 'ended') {
+          setConnectionState('disconnected')
+        }
+      } catch (err) {
+        console.error('Failed to parse WebSocket message:', err)
+      }
+    }
+
+    ws.onerror = () => {
+      setError('WebSocket connection error')
+    }
+
+    ws.onclose = () => {
+      wsRef.current = null
+
+      // Don't reconnect if match ended or we've exceeded attempts
+      if (matchState?.status === 'Completed' || matchState?.status === 'Settled') {
+        setConnectionState('disconnected')
+        return
+      }
+
+      if (reconnectAttemptRef.current < maxReconnectAttempts) {
+        setConnectionState('reconnecting')
+        reconnectAttemptRef.current += 1
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 30000)
+
+        setTimeout(() => {
+          connectWebSocket()
+        }, delay)
+      } else {
+        setConnectionState('error')
+        setError('Connection lost. Please refresh the page.')
+      }
+    }
+  }, [matchId, matchState?.status])
 
   useEffect(() => {
-    // Mock data for demo
-    setMatchState({
-      matchId,
-      status: 'InProgress',
-      timeRemainingSecs: 600,
-      agent1State: {
-        agentId: 1,
-        balance: 10250.5,
-        positions: [
-          {
-            symbol: 'BTC',
-            side: 'Long',
-            size: 1000,
-            entryPrice: 42500,
-            currentPrice: 42750,
-            unrealizedPnl: 5.88,
-            leverage: 2,
-          },
-        ],
-        pnl: 250.5,
-        tradesCount: 5,
-      },
-      agent2State: {
-        agentId: 2,
-        balance: 9850.2,
-        positions: [
-          {
-            symbol: 'ETH',
-            side: 'Short',
-            size: 800,
-            entryPrice: 2250,
-            currentPrice: 2280,
-            unrealizedPnl: -10.67,
-            leverage: 3,
-          },
-        ],
-        pnl: -149.8,
-        tradesCount: 3,
-      },
-      prices: {
-        BTC: 42750,
-        ETH: 2280,
-        SOL: 98.5,
-      },
-    })
+    // Fetch initial state
+    fetchInitialState()
 
-    // Generate mock P&L history
-    const history = []
-    for (let i = 0; i < 30; i++) {
-      history.push({
-        time: i,
-        agent1: Math.random() * 500 - 100 + i * 8,
-        agent2: Math.random() * 400 - 200 + i * 2,
-      })
+    // Connect WebSocket
+    connectWebSocket()
+
+    // Cleanup
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+        wsRef.current = null
+      }
     }
-    setPnlHistory(history)
+  }, [matchId, fetchInitialState, connectWebSocket])
 
-    // In production, connect to WebSocket
-    // const ws = new WebSocket(`${WS_URL}/ws/matches/${matchId}`)
-    // ws.onmessage = (event) => {
-    //   const data = JSON.parse(event.data)
-    //   if (data.type === 'state') {
-    //     setMatchState(data.data)
-    //   }
-    // }
-    // return () => ws.close()
-  }, [matchId])
+  // Connection status indicator
+  const ConnectionStatus = () => {
+    switch (connectionState) {
+      case 'connected':
+        return (
+          <div className="flex items-center gap-1 text-green-400 text-sm">
+            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            Live
+          </div>
+        )
+      case 'reconnecting':
+        return (
+          <div className="flex items-center gap-1 text-yellow-400 text-sm">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Reconnecting...
+          </div>
+        )
+      case 'error':
+      case 'disconnected':
+        return (
+          <div className="flex items-center gap-1 text-red-400 text-sm">
+            <WifiOff className="w-3 h-3" />
+            Disconnected
+          </div>
+        )
+      default:
+        return (
+          <div className="flex items-center gap-1 text-gray-400 text-sm">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Connecting...
+          </div>
+        )
+    }
+  }
 
   if (!matchState) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex flex-col items-center justify-center h-64 gap-4">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
+        {error && (
+          <p className="text-red-400 text-sm">{error}</p>
+        )}
       </div>
     )
   }
@@ -133,10 +210,13 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
       {/* Main Chart */}
       <div className="lg:col-span-2 bg-arena-card rounded-xl border border-arena-border p-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold">P&L Over Time</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="font-bold">P&L Over Time</h3>
+            <ConnectionStatus />
+          </div>
           <div className="flex items-center gap-2 text-lg">
-            <Clock className="w-5 h-5 text-gray-400" />
-            <span className="font-mono">
+            <Clock className="w-5 h-5 text-gray-400" aria-hidden="true" />
+            <span className="font-mono" aria-label={`${minutes} minutes and ${seconds} seconds remaining`}>
               {minutes}:{seconds.toString().padStart(2, '0')}
             </span>
           </div>

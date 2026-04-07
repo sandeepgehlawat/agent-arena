@@ -2,8 +2,38 @@ use crate::error::{Error, Result};
 use crate::models::*;
 use crate::x402::X402Handler;
 use futures::{SinkExt, StreamExt};
-use reqwest::{header, Client};
+use reqwest::{header, Client, StatusCode};
+use std::time::Duration;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+/// Configuration for the Arena client
+#[derive(Clone)]
+pub struct ArenaClientConfig {
+    pub base_url: String,
+    pub private_key: Option<String>,
+    pub rpc_url: Option<String>,
+    pub usdc_address: Option<String>,
+    /// Maximum number of retries for transient failures (default: 3)
+    pub max_retries: usize,
+    /// Base delay between retries in milliseconds (default: 1000)
+    pub retry_delay_ms: u64,
+    /// Request timeout in seconds (default: 30)
+    pub timeout_secs: u64,
+}
+
+impl Default for ArenaClientConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:3460".to_string(),
+            private_key: None,
+            rpc_url: None,
+            usdc_address: None,
+            max_retries: 3,
+            retry_delay_ms: 1000,
+            timeout_secs: 30,
+        }
+    }
+}
 
 /// Arena client for interacting with AgentArena backend
 pub struct ArenaClient {
@@ -12,35 +42,117 @@ pub struct ArenaClient {
     http_client: Client,
     x402_handler: Option<X402Handler>,
     agent_id: Option<u64>,
+    max_retries: usize,
+    retry_delay_ms: u64,
 }
 
 impl ArenaClient {
     /// Create a new client with optional wallet for payments
     pub fn new(base_url: &str, private_key: Option<&str>) -> Result<Self> {
-        let base_url = base_url.trim_end_matches('/').to_string();
+        Self::with_config(ArenaClientConfig {
+            base_url: base_url.to_string(),
+            private_key: private_key.map(String::from),
+            ..Default::default()
+        })
+    }
+
+    /// Create a new client with full configuration
+    pub fn with_config(config: ArenaClientConfig) -> Result<Self> {
+        let base_url = config.base_url.trim_end_matches('/').to_string();
 
         // Convert HTTP URL to WebSocket URL
         let ws_url = base_url
             .replace("http://", "ws://")
             .replace("https://", "wss://");
 
-        let x402_handler = if let Some(pk) = private_key {
+        let x402_handler = if let Some(pk) = config.private_key.as_ref() {
             Some(X402Handler::new(
                 pk,
-                "https://rpc.xlayer.tech",
-                "0x74b7F16337b8972027F6196A17a631aC6dE26d22", // USDC on XLayer
+                config.rpc_url.as_deref().unwrap_or("https://rpc.xlayer.tech"),
+                config.usdc_address.as_deref().unwrap_or("0x74b7F16337b8972027F6196A17a631aC6dE26d22"),
             )?)
         } else {
             None
         };
 
+        let http_client = Client::builder()
+            .timeout(Duration::from_secs(config.timeout_secs))
+            .build()
+            .map_err(|e| Error::Config(format!("Failed to create HTTP client: {}", e)))?;
+
         Ok(Self {
             base_url,
             ws_url,
-            http_client: Client::new(),
+            http_client,
             x402_handler,
             agent_id: None,
+            max_retries: config.max_retries,
+            retry_delay_ms: config.retry_delay_ms,
         })
+    }
+
+    /// Check if an error is retryable
+    fn is_retryable_status(status: StatusCode) -> bool {
+        status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS
+    }
+
+    /// Execute a request with retry logic
+    async fn request_with_retry<T, F, Fut>(&self, operation: F) -> Result<T>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<reqwest::Response>>,
+        T: serde::de::DeserializeOwned,
+    {
+        let mut last_error = None;
+
+        for attempt in 0..=self.max_retries {
+            match operation().await {
+                Ok(response) => {
+                    let status = response.status();
+
+                    if status.is_success() {
+                        return Ok(response.json().await?);
+                    }
+
+                    if status == StatusCode::PAYMENT_REQUIRED {
+                        // Don't retry payment required errors
+                        return Err(Error::Api("Payment required".to_string()));
+                    }
+
+                    if Self::is_retryable_status(status) && attempt < self.max_retries {
+                        let delay = self.retry_delay_ms * (1 << attempt);
+                        tracing::warn!(
+                            "Request failed with status {}, retrying in {}ms (attempt {}/{})",
+                            status,
+                            delay,
+                            attempt + 1,
+                            self.max_retries
+                        );
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        continue;
+                    }
+
+                    let error: serde_json::Value = response.json().await?;
+                    return Err(Error::Api(error["error"].as_str().unwrap_or("Unknown error").to_string()));
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < self.max_retries {
+                        let delay = self.retry_delay_ms * (1 << attempt);
+                        tracing::warn!(
+                            "Request failed, retrying in {}ms (attempt {}/{}): {:?}",
+                            delay,
+                            attempt + 1,
+                            self.max_retries,
+                            last_error
+                        );
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| Error::Api("Request failed after retries".to_string())))
     }
 
     /// Set the agent ID for this client
@@ -292,29 +404,119 @@ impl ArenaClient {
         Ok(response.json().await?)
     }
 
-    /// Subscribe to match updates via WebSocket
+    /// Subscribe to match updates via WebSocket with automatic reconnection
     pub async fn subscribe_to_match(
         &self,
         match_id: &str,
-    ) -> Result<impl futures::Stream<Item = Result<WsMessage>>> {
+    ) -> Result<MatchSubscription> {
         let url = format!("{}/ws/matches/{}", self.ws_url, match_id);
+        MatchSubscription::connect(&url, self.max_retries, self.retry_delay_ms).await
+    }
+}
 
-        let (ws_stream, _) = connect_async(&url).await?;
+/// Configuration for WebSocket reconnection
+pub struct ReconnectConfig {
+    pub max_attempts: usize,
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: u64,
+    pub backoff_multiplier: u64,
+}
+
+impl Default for ReconnectConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 5,
+            initial_delay_ms: 1000,
+            max_delay_ms: 30000,
+            backoff_multiplier: 2,
+        }
+    }
+}
+
+/// A WebSocket subscription with automatic reconnection
+pub struct MatchSubscription {
+    url: String,
+    max_retries: usize,
+    retry_delay_ms: u64,
+    stream: Option<futures::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>,
+    reconnect_attempt: usize,
+}
+
+impl MatchSubscription {
+    async fn connect(url: &str, max_retries: usize, retry_delay_ms: u64) -> Result<Self> {
+        let (ws_stream, _) = connect_async(url).await?;
         let (_, read) = ws_stream.split();
 
-        Ok(read.filter_map(|msg| async {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    match serde_json::from_str::<WsMessage>(&text) {
-                        Ok(ws_msg) => Some(Ok(ws_msg)),
-                        Err(e) => Some(Err(Error::Json(e))),
+        Ok(Self {
+            url: url.to_string(),
+            max_retries,
+            retry_delay_ms,
+            stream: Some(read),
+            reconnect_attempt: 0,
+        })
+    }
+
+    /// Get the next message, with automatic reconnection on disconnect
+    pub async fn next_message(&mut self) -> Option<Result<WsMessage>> {
+        loop {
+            if let Some(stream) = self.stream.as_mut() {
+                match stream.next().await {
+                    Some(Ok(Message::Text(text))) => {
+                        self.reconnect_attempt = 0; // Reset on successful message
+                        match serde_json::from_str::<WsMessage>(&text) {
+                            Ok(msg) => return Some(Ok(msg)),
+                            Err(e) => return Some(Err(Error::Json(e))),
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) => {
+                        self.stream = None;
+                        // Attempt reconnection
+                    }
+                    Some(Err(e)) => {
+                        self.stream = None;
+                        tracing::warn!("WebSocket error, will attempt reconnection: {}", e);
+                    }
+                    Some(Ok(_)) => continue, // Ignore ping/pong/binary
+                    None => {
+                        self.stream = None;
                     }
                 }
-                Ok(Message::Close(_)) => None,
-                Err(e) => Some(Err(Error::WebSocket(e))),
-                _ => None,
             }
-        }))
+
+            // Attempt reconnection
+            if self.reconnect_attempt >= self.max_retries {
+                return Some(Err(Error::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed)));
+            }
+
+            self.reconnect_attempt += 1;
+            let delay = self.retry_delay_ms * (1 << (self.reconnect_attempt - 1));
+            let delay = delay.min(30000); // Cap at 30 seconds
+
+            tracing::info!(
+                "Reconnecting to WebSocket in {}ms (attempt {}/{})",
+                delay,
+                self.reconnect_attempt,
+                self.max_retries
+            );
+
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+
+            match connect_async(&self.url).await {
+                Ok((ws_stream, _)) => {
+                    let (_, read) = ws_stream.split();
+                    self.stream = Some(read);
+                    tracing::info!("WebSocket reconnected successfully");
+                }
+                Err(e) => {
+                    tracing::warn!("WebSocket reconnection failed: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Close the subscription
+    pub fn close(&mut self) {
+        self.stream = None;
     }
 
     /// Get USDC balance (if wallet configured)

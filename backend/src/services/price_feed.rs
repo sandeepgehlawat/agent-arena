@@ -10,6 +10,8 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 pub struct PriceFeed {
     prices: Arc<RwLock<HashMap<String, f64>>>,
     subscribers: Arc<RwLock<Vec<tokio::sync::broadcast::Sender<PriceUpdate>>>>,
+    connected: Arc<RwLock<bool>>,
+    last_update: Arc<RwLock<u64>>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +42,26 @@ impl PriceFeed {
         Self {
             prices: Arc::new(RwLock::new(HashMap::new())),
             subscribers: Arc::new(RwLock::new(Vec::new())),
+            connected: Arc::new(RwLock::new(false)),
+            last_update: Arc::new(RwLock::new(0)),
         }
+    }
+
+    /// Check if the price feed is connected and receiving data
+    pub async fn is_connected(&self) -> bool {
+        let connected = *self.connected.read().await;
+        if !connected {
+            return false;
+        }
+
+        // Also check that we've received data recently (within 30 seconds)
+        let last_update = *self.last_update.read().await;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        now - last_update < 30
     }
 
     /// Start the price feed connection
@@ -70,11 +91,19 @@ impl PriceFeed {
 
         tracing::info!("Connected to Binance price feed");
 
+        // Mark as connected
+        {
+            let mut connected = self.connected.write().await;
+            *connected = true;
+        }
+
         let (mut write, mut read) = ws_stream.split();
 
-        // Ping task to keep connection alive
+        // Clone references for the loop
         let prices = self.prices.clone();
         let subscribers = self.subscribers.clone();
+        let last_update = self.last_update.clone();
+        let connected = self.connected.clone();
 
         while let Some(msg) = read.next().await {
             match msg {
@@ -86,6 +115,15 @@ impl PriceFeed {
                             {
                                 let mut prices = prices.write().await;
                                 prices.insert(symbol.clone(), price);
+                            }
+
+                            // Update last_update timestamp
+                            {
+                                let mut lu = last_update.write().await;
+                                *lu = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs();
                             }
 
                             // Notify subscribers
@@ -115,6 +153,12 @@ impl PriceFeed {
                 }
                 _ => {}
             }
+        }
+
+        // Mark as disconnected
+        {
+            let mut connected = connected.write().await;
+            *connected = false;
         }
 
         Ok(())

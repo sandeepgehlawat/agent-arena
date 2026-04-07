@@ -19,6 +19,24 @@ export interface ArenaClientOptions {
   privateKey?: string;
   rpcUrl?: string;
   usdcAddress?: string;
+  /** Maximum number of retries for transient failures (default: 3) */
+  maxRetries?: number;
+  /** Base delay in ms between retries (default: 1000) */
+  retryDelayMs?: number;
+  /** Request timeout in ms (default: 30000) */
+  timeoutMs?: number;
+}
+
+/** Configuration for WebSocket reconnection */
+export interface ReconnectionOptions {
+  /** Maximum reconnection attempts (default: 5) */
+  maxAttempts?: number;
+  /** Initial delay between reconnection attempts in ms (default: 1000) */
+  initialDelayMs?: number;
+  /** Maximum delay between reconnection attempts in ms (default: 30000) */
+  maxDelayMs?: number;
+  /** Multiplier for exponential backoff (default: 2) */
+  backoffMultiplier?: number;
 }
 
 /**
@@ -28,16 +46,25 @@ export class ArenaClient {
   private baseUrl: string;
   private wsUrl: string;
   private x402Handler?: X402Handler;
+  private maxRetries: number;
+  private retryDelayMs: number;
+  private timeoutMs: number;
 
   constructor(options: ArenaClientOptions | string, privateKey?: string) {
     if (typeof options === 'string') {
       // Legacy constructor: new ArenaClient(baseUrl, privateKey)
       this.baseUrl = options.replace(/\/$/, '');
+      this.maxRetries = 3;
+      this.retryDelayMs = 1000;
+      this.timeoutMs = 30000;
       if (privateKey) {
         this.x402Handler = new X402Handler(privateKey);
       }
     } else {
       this.baseUrl = options.baseUrl.replace(/\/$/, '');
+      this.maxRetries = options.maxRetries ?? 3;
+      this.retryDelayMs = options.retryDelayMs ?? 1000;
+      this.timeoutMs = options.timeoutMs ?? 30000;
       if (options.privateKey) {
         this.x402Handler = new X402Handler(
           options.privateKey,
@@ -51,7 +78,32 @@ export class ArenaClient {
   }
 
   /**
-   * Make an HTTP request to the API
+   * Sleep utility for retry delays
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Check if error is retryable (transient network/server issues)
+   */
+  private isRetryable(error: unknown): boolean {
+    if (error instanceof ApiError) {
+      // Retry on server errors (5xx) but not client errors (4xx)
+      return error.statusCode >= 500 && error.statusCode < 600;
+    }
+    // Retry on network errors
+    if (error instanceof Error) {
+      return error.message.includes('network') ||
+             error.message.includes('timeout') ||
+             error.message.includes('ECONNREFUSED') ||
+             error.message.includes('ETIMEDOUT');
+    }
+    return false;
+  }
+
+  /**
+   * Make an HTTP request to the API with retry logic
    */
   private async request<T>(
     method: string,
@@ -60,26 +112,62 @@ export class ArenaClient {
     headers?: Record<string, string>
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+    let lastError: Error | undefined;
 
-    const response = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
-      body: body ? JSON.stringify(toSnakeCase(body)) : undefined,
-    });
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    const data = await response.json();
+        const response = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body: body ? JSON.stringify(toSnakeCase(body)) : undefined,
+          signal: controller.signal,
+        });
 
-    if (!response.ok) {
-      if (response.status === 402) {
-        throw new PaymentRequiredError(toCamelCase(data.payment));
+        clearTimeout(timeoutId);
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          if (response.status === 402) {
+            throw new PaymentRequiredError(toCamelCase(data.payment));
+          }
+          const error = new ApiError(data.error || 'Unknown error', response.status);
+
+          // Don't retry client errors (except rate limiting)
+          if (response.status !== 429 && response.status < 500) {
+            throw error;
+          }
+          throw error;
+        }
+
+        return toCamelCase<T>(data);
+      } catch (e) {
+        lastError = e as Error;
+
+        // Don't retry payment required errors
+        if (e instanceof PaymentRequiredError) {
+          throw e;
+        }
+
+        // Check if we should retry
+        if (attempt < this.maxRetries && this.isRetryable(e)) {
+          const delay = this.retryDelayMs * Math.pow(2, attempt);
+          console.warn(`Request failed, retrying in ${delay}ms (attempt ${attempt + 1}/${this.maxRetries}):`, e);
+          await this.sleep(delay);
+          continue;
+        }
+
+        throw e;
       }
-      throw new ApiError(data.error || 'Unknown error', response.status);
     }
 
-    return toCamelCase<T>(data);
+    throw lastError || new Error('Request failed after retries');
   }
 
   /**
@@ -194,7 +282,7 @@ export class ArenaClient {
   }
 
   /**
-   * Subscribe to match updates via WebSocket
+   * Subscribe to match updates via WebSocket with automatic reconnection
    */
   subscribeToMatch(
     matchId: string,
@@ -205,46 +293,103 @@ export class ArenaClient {
       onEnded?: (event: WsMessage & { type: 'ended' }) => void;
       onError?: (error: string) => void;
       onClose?: () => void;
-    }
-  ): WebSocket {
+      onReconnecting?: (attempt: number) => void;
+      onReconnected?: () => void;
+    },
+    reconnectOptions?: ReconnectionOptions
+  ): { ws: WebSocket; close: () => void } {
     const url = `${this.wsUrl}/ws/matches/${matchId}`;
-    const ws = new WebSocket(url);
+    const options: Required<ReconnectionOptions> = {
+      maxAttempts: reconnectOptions?.maxAttempts ?? 5,
+      initialDelayMs: reconnectOptions?.initialDelayMs ?? 1000,
+      maxDelayMs: reconnectOptions?.maxDelayMs ?? 30000,
+      backoffMultiplier: reconnectOptions?.backoffMultiplier ?? 2,
+    };
 
-    ws.on('message', (data: WebSocket.Data) => {
-      try {
-        const message = toCamelCase<WsMessage>(JSON.parse(data.toString()));
+    let ws: WebSocket;
+    let reconnectAttempt = 0;
+    let intentionalClose = false;
+    let matchEnded = false;
 
-        switch (message.type) {
-          case 'state':
-            callbacks.onState?.(message.data);
-            break;
-          case 'trade':
-            callbacks.onTrade?.(message as WsMessage & { type: 'trade' });
-            break;
-          case 'started':
-            callbacks.onStarted?.();
-            break;
-          case 'ended':
-            callbacks.onEnded?.(message as WsMessage & { type: 'ended' });
-            break;
-          case 'error':
-            callbacks.onError?.(message.error);
-            break;
+    const connect = () => {
+      ws = new WebSocket(url);
+
+      ws.on('open', () => {
+        if (reconnectAttempt > 0) {
+          callbacks.onReconnected?.();
         }
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e);
+        reconnectAttempt = 0;
+      });
+
+      ws.on('message', (data: WebSocket.Data) => {
+        try {
+          const message = toCamelCase<WsMessage>(JSON.parse(data.toString()));
+
+          switch (message.type) {
+            case 'state':
+              callbacks.onState?.(message.data);
+              break;
+            case 'trade':
+              callbacks.onTrade?.(message as WsMessage & { type: 'trade' });
+              break;
+            case 'started':
+              callbacks.onStarted?.();
+              break;
+            case 'ended':
+              matchEnded = true;
+              callbacks.onEnded?.(message as WsMessage & { type: 'ended' });
+              break;
+            case 'error':
+              callbacks.onError?.(message.error);
+              break;
+          }
+        } catch (e) {
+          console.error('Failed to parse WebSocket message:', e);
+        }
+      });
+
+      ws.on('close', () => {
+        callbacks.onClose?.();
+
+        // Don't reconnect if intentionally closed or match ended
+        if (intentionalClose || matchEnded) {
+          return;
+        }
+
+        // Attempt reconnection
+        if (reconnectAttempt < options.maxAttempts) {
+          reconnectAttempt++;
+          callbacks.onReconnecting?.(reconnectAttempt);
+
+          const delay = Math.min(
+            options.initialDelayMs * Math.pow(options.backoffMultiplier, reconnectAttempt - 1),
+            options.maxDelayMs
+          );
+
+          setTimeout(() => {
+            if (!intentionalClose && !matchEnded) {
+              connect();
+            }
+          }, delay);
+        } else {
+          callbacks.onError?.(`Failed to reconnect after ${options.maxAttempts} attempts`);
+        }
+      });
+
+      ws.on('error', (err) => {
+        callbacks.onError?.(err.message);
+      });
+    };
+
+    connect();
+
+    return {
+      get ws() { return ws; },
+      close: () => {
+        intentionalClose = true;
+        ws.close();
       }
-    });
-
-    ws.on('close', () => {
-      callbacks.onClose?.();
-    });
-
-    ws.on('error', (err) => {
-      callbacks.onError?.(err.message);
-    });
-
-    return ws;
+    };
   }
 
   /**

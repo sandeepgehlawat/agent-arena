@@ -136,20 +136,10 @@ impl X402Service {
             });
         }
 
-        // Dev mode bypass for testing
-        let is_dev = std::env::var("ENVIRONMENT").unwrap_or_default() == "development"
-            || cfg!(debug_assertions);
-
-        let tx_verified = if is_dev && proof.tx_hash.starts_with("DEV_PAYMENT_") {
-            tracing::info!(
-                "[x402] Dev mode: accepting simulated payment {}",
-                proof.tx_hash
-            );
-            true
-        } else {
-            self.verify_tx_on_chain(&proof.tx_hash, &cached.recipient, cached.amount)
-                .await?
-        };
+        // Verify transaction on-chain - NO DEV BYPASS IN PRODUCTION
+        // Dev payments should use a testnet with real test transactions
+        let tx_verified = self.verify_tx_on_chain(&proof.tx_hash, &cached.recipient, cached.amount)
+            .await?;
 
         if !tx_verified {
             return Ok(X402VerificationResult {
