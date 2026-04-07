@@ -81,7 +81,6 @@ export default function RootLayout({
               {/* Right */}
               <div className="flex items-center gap-3">
                 <span className="hidden sm:inline-flex live-indicator">● LIVE</span>
-                <button className="btn-primary text-xs py-2 px-4">Connect</button>
                 <button
                   className="md:hidden w-10 h-10 border-[3px] border-ink bg-paper font-display text-lg"
                   onClick={() => setOpen(!open)}
