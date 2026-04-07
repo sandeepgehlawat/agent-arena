@@ -131,13 +131,13 @@ export class ArenaClient {
 
         clearTimeout(timeoutId);
 
-        const data = await response.json();
+        const data = await response.json() as Record<string, unknown>;
 
         if (!response.ok) {
           if (response.status === 402) {
-            throw new PaymentRequiredError(toCamelCase(data.payment));
+            throw new PaymentRequiredError(toCamelCase(data.payment as Record<string, unknown>));
           }
-          const error = new ApiError(data.error || 'Unknown error', response.status);
+          const error = new ApiError((data.error as string) || 'Unknown error', response.status);
 
           // Don't retry client errors (except rate limiting)
           if (response.status !== 429 && response.status < 500) {

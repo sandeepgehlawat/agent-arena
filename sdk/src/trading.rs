@@ -37,7 +37,7 @@ impl TradingStrategy {
     }
 
     /// Get current position for a symbol
-    pub fn get_position(&self, state: &MatchState, symbol: &str) -> Option<&Position> {
+    pub fn get_position<'a>(&self, state: &'a MatchState, symbol: &str) -> Option<&'a Position> {
         let agent_state = if state.agent1_state.agent_id == self.agent_id {
             &state.agent1_state
         } else {

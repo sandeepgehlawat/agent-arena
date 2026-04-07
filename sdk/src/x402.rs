@@ -73,8 +73,8 @@ impl X402Handler {
         }
 
         // Execute transfer
-        let tx = usdc
-            .transfer(recipient, U256::from(request.amount))
+        let transfer_call = usdc.transfer(recipient, U256::from(request.amount));
+        let tx = transfer_call
             .send()
             .await
             .map_err(|e| Error::Api(format!("Transfer failed: {}", e)))?;
