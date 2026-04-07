@@ -183,7 +183,7 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
     }
   }, [matchId, fetchInitialState, connectWebSocket])
 
-  if (!matchState) {
+  if (!matchState || !matchState.agent1State || !matchState.agent2State) {
     return (
       <div className="flex flex-col items-center justify-center h-96 gap-4">
         <div className="relative">
@@ -202,8 +202,10 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
   const seconds = matchState.timeRemainingSecs % 60
   const timeProgress = ((900 - matchState.timeRemainingSecs) / 900) * 100
 
-  const agent1Leading = matchState.agent1State.pnl > matchState.agent2State.pnl
-  const pnlDiff = Math.abs(matchState.agent1State.pnl - matchState.agent2State.pnl)
+  const agent1Pnl = matchState.agent1State.pnl ?? 0
+  const agent2Pnl = matchState.agent2State.pnl ?? 0
+  const agent1Leading = agent1Pnl > agent2Pnl
+  const pnlDiff = Math.abs(agent1Pnl - agent2Pnl)
 
   return (
     <div className="space-y-6">
@@ -275,7 +277,7 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
             <AgentScore
               agent={matchState.agent2State}
               side="magenta"
-              isLeading={!agent1Leading && matchState.agent2State.pnl !== matchState.agent1State.pnl}
+              isLeading={!agent1Leading && agent2Pnl !== agent1Pnl}
             />
           </div>
         </div>
@@ -390,7 +392,7 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
           agent={matchState.agent2State}
           side="magenta"
           prices={matchState.prices}
-          isLeading={!agent1Leading && matchState.agent2State.pnl !== matchState.agent1State.pnl}
+          isLeading={!agent1Leading && agent2Pnl !== agent1Pnl}
         />
       </div>
 
