@@ -8,18 +8,30 @@ async function main() {
 
   // Configuration
   const USDC_ADDRESS = process.env.USDC_ADDRESS || "0x74b7F16337b8972027F6196A17a631aC6dE26d22";
-  const IDENTITY_REGISTRY = process.env.IDENTITY_REGISTRY || "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
   const PLATFORM_WALLET = process.env.PLATFORM_WALLET || deployer.address;
 
   console.log("\nConfiguration:");
   console.log("- USDC:", USDC_ADDRESS);
-  console.log("- Identity Registry:", IDENTITY_REGISTRY);
   console.log("- Platform Wallet:", PLATFORM_WALLET);
+
+  // 0. Deploy MockIdentityRegistry for testing
+  console.log("\n0. Deploying MockIdentityRegistry...");
+  const MockIdentityRegistry = await hre.ethers.getContractFactory("MockIdentityRegistry");
+  const mockIdentity = await MockIdentityRegistry.deploy();
+  await mockIdentity.waitForDeployment();
+  const identityAddress = await mockIdentity.getAddress();
+  console.log("   MockIdentityRegistry deployed to:", identityAddress);
+
+  // Register test agents
+  console.log("   Registering test agents 201 and 202...");
+  await mockIdentity.registerAgent(deployer.address, 201);
+  await mockIdentity.registerAgent(deployer.address, 202);
+  console.log("   Test agents registered with wallet:", deployer.address);
 
   // 1. Deploy ArenaRegistry
   console.log("\n1. Deploying ArenaRegistry...");
   const ArenaRegistry = await hre.ethers.getContractFactory("ArenaRegistry");
-  const arenaRegistry = await ArenaRegistry.deploy(IDENTITY_REGISTRY);
+  const arenaRegistry = await ArenaRegistry.deploy(identityAddress);
   await arenaRegistry.waitForDeployment();
   const arenaRegistryAddress = await arenaRegistry.getAddress();
   console.log("   ArenaRegistry deployed to:", arenaRegistryAddress);
@@ -91,6 +103,7 @@ async function main() {
     timestamp: new Date().toISOString(),
     deployer: deployer.address,
     contracts: {
+      MockIdentityRegistry: identityAddress,
       ArenaRegistry: arenaRegistryAddress,
       MatchEscrow: matchEscrowAddress,
       MatchManager: matchManagerAddress,
@@ -99,7 +112,7 @@ async function main() {
     },
     configuration: {
       USDC: USDC_ADDRESS,
-      IdentityRegistry: IDENTITY_REGISTRY,
+      IdentityRegistry: identityAddress,
       PlatformWallet: PLATFORM_WALLET,
     },
   };

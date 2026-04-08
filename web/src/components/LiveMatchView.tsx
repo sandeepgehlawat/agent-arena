@@ -108,6 +108,12 @@ interface TradeEvent {
   timestamp: number
 }
 
+// Calculate total P&L = realized + unrealized from open positions
+function getTotalPnl(agent: AgentState): number {
+  const unrealizedPnl = agent.positions.reduce((sum, pos) => sum + pos.unrealizedPnl, 0)
+  return agent.pnl + unrealizedPnl
+}
+
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3460'
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3460'
 
@@ -166,8 +172,8 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
             setPnlHistory((prev) => {
               const newPoint = {
                 time: prev.length,
-                agent1: mapped.agent1State.pnl ?? 0,
-                agent2: mapped.agent2State.pnl ?? 0,
+                agent1: getTotalPnl(mapped.agent1State),
+                agent2: getTotalPnl(mapped.agent2State),
               }
               return [...prev, newPoint].slice(-120) // 2 minutes of data
             })
@@ -251,8 +257,8 @@ export function LiveMatchView({ matchId }: { matchId: string }) {
   const seconds = matchState.timeRemainingSecs % 60
   const timeProgress = ((900 - matchState.timeRemainingSecs) / 900) * 100
 
-  const agent1Pnl = matchState.agent1State.pnl ?? 0
-  const agent2Pnl = matchState.agent2State.pnl ?? 0
+  const agent1Pnl = getTotalPnl(matchState.agent1State)
+  const agent2Pnl = getTotalPnl(matchState.agent2State)
   const agent1Leading = agent1Pnl > agent2Pnl
   const pnlDiff = Math.abs(agent1Pnl - agent2Pnl)
 
@@ -496,7 +502,8 @@ function AgentScore({
   side: 'cyan' | 'magenta'
   isLeading: boolean
 }) {
-  const isPositive = agent.pnl >= 0
+  const totalPnl = getTotalPnl(agent)
+  const isPositive = totalPnl >= 0
 
   return (
     <div className={`text-center ${side === 'magenta' ? 'order-last' : ''}`}>
@@ -529,7 +536,7 @@ function AgentScore({
           ${isPositive ? 'text-success' : 'text-danger'}
         `}
       >
-        {isPositive ? '+' : ''}${agent.pnl.toFixed(2)}
+        {isPositive ? '+' : ''}${totalPnl.toFixed(2)}
       </div>
       <div className="text-text-tertiary text-sm font-body mt-1">
         {agent.tradesCount} trades
@@ -549,7 +556,8 @@ function AgentPanel({
   prices: Record<string, number>
   isLeading: boolean
 }) {
-  const isPositive = agent.pnl >= 0
+  const totalPnl = getTotalPnl(agent)
+  const isPositive = totalPnl >= 0
 
   return (
     <div className={`glass-panel p-5 ${side === 'cyan' ? 'glow-border-cyan' : 'glow-border-magenta'}`}>
@@ -591,7 +599,7 @@ function AgentPanel({
             }`}
           >
             {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-            {isPositive ? '+' : ''}${agent.pnl.toFixed(2)}
+            {isPositive ? '+' : ''}${totalPnl.toFixed(2)}
           </div>
         </div>
         <div className="bg-elevated rounded-lg p-3">

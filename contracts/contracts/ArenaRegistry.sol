@@ -79,6 +79,7 @@ contract ArenaRegistry is Ownable {
         identityRegistry = IIdentityRegistry(_identityRegistry);
 
         // Initialize default tiers
+        tiers.push(Tier("Free", 0, 0));                   // $0 for testing
         tiers.push(Tier("Rookie", 0, 5_000_000));          // $5
         tiers.push(Tier("Bronze", 1100, 25_000_000));      // $25
         tiers.push(Tier("Silver", 1300, 100_000_000));     // $100
@@ -238,6 +239,10 @@ contract ArenaRegistry is Ownable {
 
     function setLeaderboardContract(address _leaderboardContract) external onlyOwner {
         leaderboardContract = ILeaderboardContract(_leaderboardContract);
+    }
+
+    function setIdentityRegistry(address _identityRegistry) external onlyOwner {
+        identityRegistry = IIdentityRegistry(_identityRegistry);
     }
 
     // Internal ELO calculation

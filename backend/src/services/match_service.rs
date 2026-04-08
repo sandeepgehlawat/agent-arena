@@ -102,6 +102,35 @@ impl MatchService {
         Ok(m)
     }
 
+    /// Create a match with a specific ID (for on-chain sync)
+    pub async fn create_match_with_id(
+        &self,
+        match_id: &str,
+        agent1_id: u64,
+        agent2_id: u64,
+        tier: u64,
+    ) -> Result<Match> {
+        let tiers = default_tiers();
+        let entry_fee = if (tier as usize) < tiers.len() {
+            tiers[tier as usize].entry_fee_usdc
+        } else {
+            0
+        };
+
+        let mut m = Match::new(agent1_id, agent2_id, tier, entry_fee);
+        m.match_id = match_id.to_string();
+
+        let mut matches = self.matches.write().await;
+        matches.insert(match_id.to_string(), m.clone());
+
+        // Create broadcaster
+        let (tx, _) = broadcast::channel(100);
+        let mut broadcasters = self.broadcasters.write().await;
+        broadcasters.insert(match_id.to_string(), tx);
+
+        Ok(m)
+    }
+
     /// Fund a match (mark agent as having paid)
     pub async fn fund_match(&self, match_id: &str, agent_id: u64) -> Result<Match> {
         let mut matches = self.matches.write().await;

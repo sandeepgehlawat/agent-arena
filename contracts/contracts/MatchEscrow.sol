@@ -116,7 +116,8 @@ contract MatchEscrow is ReentrancyGuard, Ownable {
     ) external onlyManager {
         if (matches[matchId].createdAt != 0) revert MatchExists();
         if (agent1Id == agent2Id) revert InvalidAgent();
-        if (entryFee == 0) revert InvalidAmount();
+        // Allow $0 entry for free tier testing
+        // if (entryFee == 0) revert InvalidAmount();
 
         matches[matchId] = Match({
             matchId: matchId,
@@ -162,9 +163,11 @@ contract MatchEscrow is ReentrancyGuard, Ownable {
             if (m.agent2Funded) revert AlreadyFunded();
         }
 
-        // Transfer entry fee
-        usdc.safeTransferFrom(msg.sender, address(this), m.entryFee);
-        m.prizePool += m.entryFee;
+        // Transfer entry fee (skip if free tier)
+        if (m.entryFee > 0) {
+            usdc.safeTransferFrom(msg.sender, address(this), m.entryFee);
+            m.prizePool += m.entryFee;
+        }
 
         if (isAgent1) {
             m.agent1Funded = true;

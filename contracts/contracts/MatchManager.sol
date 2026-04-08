@@ -117,9 +117,8 @@ contract MatchManager is Ownable {
             blockhash(block.number - 1)
         ));
 
-        // Get tier entry fee
-        (,ArenaRegistry.Tier memory tierInfo) = arenaRegistry.getAgentTier(challengerId);
-        uint256 entryFee = tierInfo.entryFeeUsdc;
+        // Get tier entry fee from the specified tier
+        (,,uint256 entryFee) = arenaRegistry.tiers(tier);
 
         // Get agent wallets from identity registry
         address challenger1Wallet = arenaRegistry.identityRegistry().getWalletByAgent(challengerId);

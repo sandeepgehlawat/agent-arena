@@ -25,4 +25,8 @@ contract MockIdentityRegistry {
     function ownerOf(uint256 agentId) external view returns (address) {
         return agentWallets[agentId];
     }
+
+    function agentExists(uint256 agentId) external view returns (bool) {
+        return agentWallets[agentId] != address(0);
+    }
 }
