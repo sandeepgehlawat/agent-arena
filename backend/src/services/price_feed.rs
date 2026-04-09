@@ -66,20 +66,95 @@ impl PriceFeed {
 
     /// Start the price feed connection
     pub async fn start(&self) -> Result<()> {
-        // Binance combined stream for BTC, ETH, SOL
-        let url = "wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/ethusdt@ticker/solusdt@ticker";
+        // Try Binance WebSocket first, fall back to polling if geo-blocked
+        let binance_urls = [
+            "wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/ethusdt@ticker/solusdt@ticker",
+            "wss://stream.binance.us:9443/stream?streams=btcusdt@ticker/ethusdt@ticker/solusdt@ticker",
+        ];
+
+        let mut binance_blocked = false;
+        let mut retry_count = 0;
 
         loop {
-            match self.connect_and_stream(url).await {
-                Ok(_) => {
-                    tracing::info!("Price feed disconnected, reconnecting...");
-                }
-                Err(e) => {
-                    tracing::error!("Price feed error: {:?}, reconnecting in 5s...", e);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            if !binance_blocked {
+                for url in &binance_urls {
+                    match self.connect_and_stream(url).await {
+                        Ok(_) => {
+                            tracing::info!("Price feed disconnected, reconnecting...");
+                            retry_count = 0;
+                            continue;
+                        }
+                        Err(e) => {
+                            let err_str = format!("{:?}", e);
+                            if err_str.contains("451") || err_str.contains("403") {
+                                // Geo-blocked, switch to polling mode
+                                tracing::warn!("Binance WebSocket geo-blocked, switching to polling mode");
+                                binance_blocked = true;
+                                break;
+                            }
+                            retry_count += 1;
+                            if retry_count <= 3 {
+                                tracing::error!("Price feed error: {:?}, reconnecting in 5s...", e);
+                            } else if retry_count == 4 {
+                                tracing::warn!("Price feed errors continuing, suppressing logs...");
+                            }
+                        }
+                    }
                 }
             }
+
+            if binance_blocked {
+                // Use polling mode with CoinGecko
+                if let Err(e) = self.poll_coingecko().await {
+                    tracing::debug!("CoinGecko poll error: {:?}", e);
+                }
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
+    }
+
+    /// Poll CoinGecko for prices (fallback when WebSocket is blocked)
+    async fn poll_coingecko(&self) -> Result<()> {
+        let url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd";
+
+        let response: serde_json::Value = reqwest::get(url)
+            .await
+            .map_err(|e| AppError::Internal(format!("CoinGecko error: {}", e)))?
+            .json()
+            .await
+            .map_err(|e| AppError::Internal(format!("Parse error: {}", e)))?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut prices = self.prices.write().await;
+
+        if let Some(btc) = response["bitcoin"]["usd"].as_f64() {
+            prices.insert("BTC".to_string(), btc);
+        }
+        if let Some(eth) = response["ethereum"]["usd"].as_f64() {
+            prices.insert("ETH".to_string(), eth);
+        }
+        if let Some(sol) = response["solana"]["usd"].as_f64() {
+            prices.insert("SOL".to_string(), sol);
+        }
+
+        drop(prices);
+
+        // Update last_update and connected status
+        {
+            let mut lu = self.last_update.write().await;
+            *lu = now;
+        }
+        {
+            let mut connected = self.connected.write().await;
+            *connected = true;
+        }
+
+        Ok(())
     }
 
     async fn connect_and_stream(&self, url: &str) -> Result<()> {
