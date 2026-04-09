@@ -2,7 +2,7 @@
 nixPkgs = ["rustc", "cargo", "gcc", "openssl", "pkg-config"]
 
 [variables]
-RUST_VERSION = "1.80"
+RUST_VERSION = "1.85"
 
 [phases.build]
 cmds = ["cd backend && cargo build --release"]
