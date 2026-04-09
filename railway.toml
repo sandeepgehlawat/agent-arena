@@ -1,0 +1,10 @@
+[build]
+builder = "nixpacks"
+buildCommand = "cd backend && cargo build --release"
+
+[deploy]
+startCommand = "./backend/target/release/agent-arena-backend"
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

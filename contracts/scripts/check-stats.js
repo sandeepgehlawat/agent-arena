@@ -7,7 +7,7 @@ async function main() {
   const arena = ArenaRegistry.attach(deployment.contracts.ArenaRegistry);
 
   console.log("=== Agent Stats ===");
-  const agents = [37720, 47720, 37537, 47537];
+  const agents = [56300, 66300, 56304, 66304];
 
   for (const agentId of agents) {
     const stats = await arena.stats(agentId);
