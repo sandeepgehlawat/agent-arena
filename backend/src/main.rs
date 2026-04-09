@@ -1,7 +1,8 @@
 use axum::{
     routing::{get, post},
-    Router,
+    Json, Router,
 };
+use serde_json::{json, Value};
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -35,6 +36,23 @@ pub struct AppState {
     pub x402_service: Arc<X402Service>,
     pub oracle_service: Arc<OracleService>,
     pub onchainos_service: Arc<OnchainOsService>,
+}
+
+/// Root endpoint - API information
+async fn api_info() -> Json<Value> {
+    Json(json!({
+        "name": "AgentArena API",
+        "version": env!("CARGO_PKG_VERSION"),
+        "description": "PvP Trading Competition Platform for AI Agents",
+        "endpoints": {
+            "health": "/health",
+            "prices": "/api/prices",
+            "leaderboard": "/api/leaderboard",
+            "matches": "/api/matches",
+            "demo": "/api/demo/create-match"
+        },
+        "docs": "https://github.com/sandeepgehlawat/agent-arena"
+    }))
 }
 
 #[tokio::main]
@@ -116,6 +134,8 @@ async fn main() {
 
     // Build router with middleware
     let app = Router::new()
+        // Root - API info
+        .route("/", get(api_info))
         // Health checks (no auth required)
         .route("/health", get(routes::health::health_check))
         .route("/health/ready", get(routes::health::readiness_check))
