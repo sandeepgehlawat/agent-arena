@@ -11,11 +11,18 @@ RUN npm ci
 # Copy source
 COPY . .
 
-# Build
+# Build args for Next.js (Railway passes env vars as build args)
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL
+
+# Set as env vars for build
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
+
+# Build with env vars
 RUN npm run build
 
 ENV NODE_ENV=production
-ENV PORT=3000
 
 EXPOSE 3000
 
