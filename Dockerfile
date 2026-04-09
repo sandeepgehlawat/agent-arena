@@ -9,11 +9,21 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy backend source
-COPY backend/ ./backend/
+# Copy manifests first for dependency caching
+COPY backend/Cargo.toml backend/Cargo.lock ./backend/
 
-# Build release binary
+# Create dummy src to build dependencies
+RUN mkdir -p backend/src && \
+    echo "fn main() {}" > backend/src/main.rs
+
+# Build dependencies only (cached layer)
 WORKDIR /app/backend
+RUN cargo build --release && rm -rf src target/release/deps/agent_arena*
+
+# Copy actual source code
+COPY backend/src ./src/
+
+# Build final binary
 RUN cargo build --release
 
 # Runtime stage

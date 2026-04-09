@@ -31,8 +31,8 @@ contracts/artifacts/
 contracts/cache/
 contracts/typechain-types/
 
-# Rust
-Cargo.lock
+# Rust (keep Cargo.lock for reproducible builds)
+# Cargo.lock is intentionally committed for applications
 
 # Misc
 *.pem
