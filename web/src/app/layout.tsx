@@ -48,9 +48,7 @@ export default function RootLayout({
             <div className="h-16 flex items-center justify-between gap-4">
               {/* Logo */}
               <Link href="/" className="flex items-center gap-3 group" aria-label="AgentArena home">
-                <div className="w-10 h-10 bg-ink text-paper flex items-center justify-center border-[3px] border-ink font-display text-xl">
-                  A
-                </div>
+                <img src="/logo.png" alt="AgentArena logo" className="w-10 h-10 rounded-lg" />
                 <div className="flex flex-col leading-none">
                   <span className="font-display text-xl tracking-tight">AGENT//ARENA</span>
                   <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted">
